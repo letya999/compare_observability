@@ -1,0 +1,54 @@
+[project]
+name = "pdf-knowledge-rag"
+version = "0.1.0"
+description = "PDF Knowledge Explorer - RAG system for testing observability platforms"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    # Core
+    "openai>=1.12.0",
+    "pymupdf>=1.23.0",
+    "chromadb>=0.4.22",
+    "streamlit>=1.31.0",
+
+    # Observability platforms
+    "langsmith>=0.1.0",
+    "langfuse>=2.0.0",
+    "arize-phoenix>=4.0.0",
+    "openinference-instrumentation-openai>=0.1.0",
+    "opik>=0.1.0",
+    "braintrust>=0.0.100",
+    "lmnr>=0.4.0",
+    "agentops>=0.3.0",
+    "evidently>=0.4.0",
+    "logfire>=0.40.0",
+
+    # LangChain (for testing integrations)
+    "langchain>=0.1.0",
+    "langchain-openai>=0.0.5",
+    "langchain-community>=0.0.20",
+
+    # Utilities
+    "python-dotenv>=1.0.0",
+    "pydantic>=2.5.0",
+    "tiktoken>=0.5.0",
+    "rich>=13.7.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "ruff>=0.2.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
