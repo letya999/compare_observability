@@ -73,6 +73,7 @@ class GeneratedResponse:
     concepts: list[ConceptRelation]
     token_usage: dict[str, int]
     latency_ms: float
+    tool_calls: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass

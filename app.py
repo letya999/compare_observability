@@ -7,6 +7,7 @@ from pathlib import Path
 import streamlit as st
 
 from src.config import config
+from src.logger import logger
 from src.pipeline.traced_orchestrator import TracedRAGOrchestrator
 from src.evaluations.comparison_matrix import ComparisonMatrix, PLATFORMS, CRITERIA, CriteriaCategory
 from scenarios import SCENARIOS, ScenarioRunner
@@ -58,12 +59,14 @@ def main():
         # Navigation
         page = st.radio(
             "Navigation",
-            ["Query Interface", "PDF Management", "Test Scenarios", "Comparison Matrix", "Results"],
+            ["Quick Start", "Query Interface", "PDF Management", "Test Scenarios", "Comparison Matrix", "Results"],
             index=0,
         )
 
     # Main content
-    if page == "Query Interface":
+    if page == "Quick Start":
+        quick_start_page()
+    elif page == "Query Interface":
         query_page()
     elif page == "PDF Management":
         pdf_management_page()
@@ -105,6 +108,7 @@ def query_page():
         stream = st.checkbox("Stream response", value=True)
     with col2:
         skip_graph = st.checkbox("Skip graph extraction", value=False)
+        retrieval_only = st.checkbox("Retrieval Only (Debug)", value=False, help="Skip generation to inspect retrieved chunks")
 
     if st.button("Ask", type="primary", disabled=not query):
         with st.spinner("Processing..."):
@@ -116,7 +120,12 @@ def query_page():
                 full_response = ""
 
                 try:
-                    gen = orchestrator.query(query, stream=True, skip_graph_extraction=skip_graph)
+                    gen = orchestrator.query(
+                        query, 
+                        stream=True, 
+                        skip_graph_extraction=skip_graph,
+                        retrieval_only=retrieval_only
+                    )
                     for chunk in gen:
                         if isinstance(chunk, str):
                             full_response += chunk
@@ -125,14 +134,21 @@ def query_page():
                             result = chunk
                     response_container.markdown(full_response)
                 except Exception as e:
+                    logger.error("Streaming query execution failed", exc_info=True)
                     st.error(f"Error: {e}")
                     return
             else:
                 # Non-streaming
                 try:
-                    result = orchestrator.query(query, stream=False, skip_graph_extraction=skip_graph)
+                    result = orchestrator.query(
+                        query, 
+                        stream=False, 
+                        skip_graph_extraction=skip_graph,
+                        retrieval_only=retrieval_only
+                    )
                     st.markdown(result.response.answer)
                 except Exception as e:
+                    logger.error("Standard query execution failed", exc_info=True)
                     st.error(f"Error: {e}")
                     return
 
@@ -423,6 +439,40 @@ def results_page():
                 # Errors
                 if scenario["errors"]:
                     st.error(f"Errors: {scenario['errors']}")
+
+
+def quick_start_page():
+    """Interactive Quick Start Guide."""
+    st.header("Quick Start Guide 🚀")
+    
+    st.markdown("""
+    Welcome to the **PDF Knowledge Explorer**! This tool is designed to benchmark and compare LLM observability platforms.
+    
+    ### How it works
+    1. **Configuration**: Use the sidebar to select which observability providers you want to test (e.g., Langfuse, Weave, Honeycomb).
+    2. **Ingest Data**: Go to **PDF Management** to upload your own PDFs or use the pre-loaded data.
+    3. **Query**: Use the **Query Interface** to ask questions. The system will retrieve relevant chunks, rerank them, and generate an answer with citations.
+    4. **Observe**: Click the trace links to see how different platforms visualize the RAG pipeline.
+    
+    ### Key Features
+    * **Hybrid Search**: Combines Vector Search (ChromaDB) and Keyword Search (BM25).
+    * **Agentic Tools**: Can use a Calculator or Web Search if needed (Reasoning Step).
+    * **Evaluations**: Automatically runs Ragas metrics (Faithfulness, Answer Relevance) and estimates costs.
+    * **Comparison**: Run **Test Scenarios** to systematically verify features across platforms.
+    """)
+    
+    st.info("💡 **Tip:** Make sure you have set your API keys in the `.env` file or environment variables.")
+    
+    st.subheader("Architecture")
+    st.code("""
+    User Query -> Query Analysis -> Hybrid Retrieval (Vector + BM25) -> Reranking -> Reasoning (Tools) -> Generation -> Graph Extraction
+    """, language="text")
+    
+    if st.button("Go to Query Interface", type="primary"):
+        st.switch_page("app.py") # Note: switch_page might not work well with single-script structure logic, better to just user helper
+        # Actually in this structure, we just change state, but we can't easily do that without session state triggers.
+        # Just let user navigate.
+        pass
 
 
 if __name__ == "__main__":

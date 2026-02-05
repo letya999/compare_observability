@@ -99,20 +99,32 @@ class PDFIngestor:
         return chunks
 
     def _generate_embeddings(self, chunks: list[Chunk]) -> list[Chunk]:
-        """Generate embeddings for all chunks using OpenAI."""
+        """Generate embeddings for all chunks using OpenAI in batches."""
         if not chunks:
             return chunks
 
-        texts = [chunk.text for chunk in chunks]
-
-        # Batch embedding generation
-        response = self.client.embeddings.create(
-            model=config.embedding_model,
-            input=texts,
-        )
-
-        for i, embedding_data in enumerate(response.data):
-            chunks[i].embedding = embedding_data.embedding
+        # OpenAI has a limit of ~8192 tokens per input and 30k tokens per request (varies by model)
+        # We'll use a conservative batch size of 20 chunks to be safe
+        batch_size = 20
+        
+        for i in range(0, len(chunks), batch_size):
+            batch_chunks = chunks[i : i + batch_size]
+            texts = [chunk.text for chunk in batch_chunks]
+            
+            try:
+                response = self.client.embeddings.create(
+                    model=config.embedding_model,
+                    input=texts,
+                )
+                
+                for j, embedding_data in enumerate(response.data):
+                    # Validate index to avoid index out of bounds if response doesn't match
+                    if j < len(batch_chunks):
+                        batch_chunks[j].embedding = embedding_data.embedding
+                        
+            except Exception as e:
+                print(f"Error generating embeddings for batch starting at {i}: {e}")
+                raise e
 
         return chunks
 

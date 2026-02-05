@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 ObservabilityProvider = Literal[
-    "langsmith", "langfuse", "arize", "opik", "braintrust", "laminar", "agentops", "evidently", "logfire"
+    "langsmith", "langfuse", "arize", "opik", "braintrust", "laminar", "agentops", "evidently", "logfire", "weave", "honeycomb"
 ]
 
 
@@ -27,6 +27,8 @@ class Config:
     data_dir: Path = field(default_factory=lambda: Path("data"))
     pdf_dir: Path = field(default_factory=lambda: Path("data/pdfs"))
     chroma_dir: Path = field(default_factory=lambda: Path("data/chroma"))
+    chroma_host: str = field(default_factory=lambda: os.getenv("CHROMA_HOST", ""))
+    chroma_port: int = field(default_factory=lambda: int(os.getenv("CHROMA_PORT", "8000")))
 
     # Chunking
     chunk_size: int = 1000

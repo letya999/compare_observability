@@ -19,6 +19,8 @@ from src.observability import ObservabilityManager
 from src.observability.base import SpanType
 
 from .orchestrator import PipelineResult, RAGOrchestrator
+from src.evaluations.cost import CostTracker
+from src.evaluations.ragas_eval import RagasEvaluator
 
 
 class TracedRAGOrchestrator:
@@ -38,6 +40,8 @@ class TracedRAGOrchestrator:
         self.orchestrator = RAGOrchestrator(openai_client, persist_directory)
         self.obs_manager = ObservabilityManager(observability_providers)
         self.client = self.orchestrator.client
+        self.cost_tracker = CostTracker()
+        self.ragas_evaluator = RagasEvaluator()
 
     def ingest_pdf(self, pdf_path: Path) -> tuple[Document, int]:
         """Ingest a PDF with tracing."""
@@ -64,6 +68,8 @@ class TracedRAGOrchestrator:
         filter_doc_ids: list[str] | None = None,
         stream: bool = False,
         skip_graph_extraction: bool = False,
+        run_evals: bool = False,
+        retrieval_only: bool = False,
     ) -> PipelineResult | GenType[str, None, PipelineResult]:
         """
         Execute the full RAG pipeline with tracing.
@@ -94,12 +100,38 @@ class TracedRAGOrchestrator:
             # Step 2: Retrieval
             with self.obs_manager.span("retriever", SpanType.RETRIEVER, trace, inputs={"query": query_analysis.expanded_query or query}) as ret_span:
                 step_start = time.time()
-                retrieved_chunks = self.orchestrator.retriever.retrieve(
-                    query_analysis, filter_doc_ids=filter_doc_ids
-                )
+                
+                # 2.1 Vector Search
+                with self.obs_manager.span("vector_search", SpanType.RETRIEVER, trace, inputs={"type": "vector"}) as vec_span:
+                    vector_results = self.orchestrator.retriever.retrieve(
+                        query_analysis, filter_doc_ids=filter_doc_ids, top_k=(config.top_k * 2)
+                    )
+                    self.obs_manager.log_retrieval(
+                        vec_span,
+                        query=query_analysis.expanded_query or query,
+                        documents=[{"id": c.chunk.id, "text": c.chunk.text[:50]} for c in vector_results],
+                        scores=[c.score for c in vector_results]
+                    )
+
+                # 2.2 BM25 Search
+                with self.obs_manager.span("bm25_search", SpanType.RETRIEVER, trace, inputs={"type": "bm25"}) as bm25_span:
+                    bm25_results = self.orchestrator.retriever.retrieve_bm25(
+                        query_analysis, filter_doc_ids=filter_doc_ids, top_k=(config.top_k * 2)
+                    )
+                    self.obs_manager.log_retrieval(
+                        bm25_span,
+                        query=query_analysis.expanded_query or query,
+                        documents=[{"id": c.chunk.id, "text": c.chunk.text[:50]} for c in bm25_results],
+                        scores=[c.score for c in bm25_results]
+                    )
+
+                # 2.3 RRF Merge
+                with self.obs_manager.span("rrf_merge", SpanType.RETRIEVER, trace) as rrf_span:
+                    retrieved_chunks = self.orchestrator.retriever.rrf_merge(vector_results, bm25_results)
+
                 step_latencies["retrieval"] = (time.time() - step_start) * 1000
 
-                # Log retrieval
+                # Log final retrieval
                 self.obs_manager.log_retrieval(
                     ret_span,
                     query=query_analysis.expanded_query or query,
@@ -108,6 +140,7 @@ class TracedRAGOrchestrator:
                             "id": c.chunk.id,
                             "text": c.chunk.text[:200],
                             "page": c.chunk.page_number,
+                            "source": "vector" if any(v.chunk.id == c.chunk.id for v in vector_results) else "bm25"
                         }
                         for c in retrieved_chunks
                     ],
@@ -120,40 +153,83 @@ class TracedRAGOrchestrator:
                 reranked_chunks = self.orchestrator.reranker.rerank(query_analysis, retrieved_chunks)
                 step_latencies["reranking"] = (time.time() - step_start) * 1000
 
-            # Step 4: Generation
-            with self.obs_manager.span("generator", SpanType.LLM, trace, inputs={"context_chunks": len(reranked_chunks)}) as gen_span:
+            # Step 4: Reasoning
+            with self.obs_manager.span("reasoning", SpanType.CHAIN, trace, inputs={"context_chunks": len(reranked_chunks)}) as reason_span:
                 step_start = time.time()
+                reasoning_steps = self.orchestrator.reasoning_engine.run(query_analysis, reranked_chunks)
+                
+                # Log tool calls if any
+                reason_span.outputs = {"tool_calls": len(reasoning_steps), "steps": reasoning_steps}
+                step_latencies["reasoning"] = (time.time() - step_start) * 1000
+
+            # Step 5: Generation
+            if retrieval_only:
+                response = GeneratedResponse(
+                    answer="**Retrieval Only Mode**: Generation skipped.",
+                    citations=[],
+                    concepts=[],
+                    token_usage={},
+                    latency_ms=0.0,
+                    tool_calls=[]
+                )
+                step_latencies["generation"] = 0.0
 
                 if stream:
-                    return self._stream_response(
-                        query,
-                        query_analysis,
-                        retrieved_chunks,
-                        reranked_chunks,
-                        step_latencies,
-                        total_start,
-                        skip_graph_extraction,
-                        trace,
-                        gen_span,
+                    def _dummy_stream():
+                        yield response.answer
+                        total_latency = (time.time() - total_start) * 1000
+                        yield PipelineResult(
+                            query=query,
+                            query_analysis=query_analysis,
+                            retrieved_chunks=retrieved_chunks,
+                            reranked_chunks=reranked_chunks,
+                            reasoning_steps=reasoning_steps,
+                            response=response,
+                            concepts=[],
+                            total_latency_ms=total_latency,
+                            step_latencies=step_latencies,
+                            cost_estimate_usd=0.0,
+                            eval_metrics={}
+                        )
+                    return _dummy_stream()
+
+            else:
+                with self.obs_manager.span("generator", SpanType.LLM, trace, inputs={"context_chunks": len(reranked_chunks), "reasoning_steps": len(reasoning_steps)}) as gen_span:
+                    step_start = time.time()
+    
+                    if stream:
+                        return self._stream_response(
+                            query,
+                            query_analysis,
+                            retrieved_chunks,
+                            reranked_chunks,
+                            reasoning_steps,
+                            step_latencies,
+                            total_start,
+                            skip_graph_extraction,
+                            trace,
+                            gen_span,
+                        )
+    
+                    response = self.orchestrator.generator.generate(
+                        query_analysis, reranked_chunks, reasoning_steps=reasoning_steps
                     )
-
-                response = self.orchestrator.generator.generate(query_analysis, reranked_chunks)
-                step_latencies["generation"] = (time.time() - step_start) * 1000
-
-                # Log the generation
-                self.obs_manager.log_llm_call(
-                    gen_span,
-                    model=config.llm_model,
-                    messages=[{"role": "user", "content": query}],
-                    response=type("Response", (), {
-                        "choices": [type("Choice", (), {"message": type("Msg", (), {"content": response.answer})()})()],
-                        "usage": type("Usage", (), {
-                            "prompt_tokens": response.token_usage.get("prompt_tokens", 0),
-                            "completion_tokens": response.token_usage.get("completion_tokens", 0),
-                            "total_tokens": response.token_usage.get("total_tokens", 0),
+                    step_latencies["generation"] = (time.time() - step_start) * 1000
+    
+                    # Log the generation
+                    self.obs_manager.log_llm_call(
+                        gen_span,
+                        model=config.llm_model,
+                        messages=[{"role": "user", "content": query}],
+                        response=type("Response", (), {
+                            "choices": [type("Choice", (), {"message": type("Msg", (), {"content": response.answer})()})()],
+                            "usage": type("Usage", (), {
+                                "prompt_tokens": response.token_usage.get("prompt_tokens", 0),
+                                "completion_tokens": response.token_usage.get("completion_tokens", 0),
+                                "total_tokens": response.token_usage.get("total_tokens", 0),
+                            })(),
                         })(),
-                    })(),
-                )
+                    )
 
             # Step 5: Graph Extraction
             concepts = []
@@ -162,6 +238,36 @@ class TracedRAGOrchestrator:
                     step_start = time.time()
                     concepts = self.orchestrator.graph_extractor.extract(response)
                     step_latencies["graph_extraction"] = (time.time() - step_start) * 1000
+
+            # Step 6: Post-processing (Cost & Evals)
+            
+            # Cost
+            total_tokens = sum(s.get("total_tokens", 0) for s in [response.token_usage])
+            # Note: We should ideally sum up tokens from all steps (query analysis, reranking, etc)
+            # For now, we mainly have access to generation usage easily.
+            # Let's estimate cost based on generation usage primarily + query analysis estimate
+            cost = self.cost_tracker.estimate_cost(
+                config.llm_model, 
+                response.token_usage.get("prompt_tokens", 0), 
+                response.token_usage.get("completion_tokens", 0)
+            )
+            # Add embedding cost estimate (rough)
+            # Add reranking cost estimate (rough)
+            
+            # Evals
+            eval_metrics = {}
+            if run_evals:
+                with self.obs_manager.span("evaluation", SpanType.CHAIN, trace) as eval_span:
+                    try:
+                        eval_metrics = self.ragas_evaluator.evaluate_response(
+                            query=query,
+                            answer=response.answer,
+                            retrieved_contexts=[c.chunk.text for c in reranked_chunks]
+                        )
+                        eval_span.outputs = eval_metrics
+                    except Exception as e:
+                        print(f"Eval failed: {e}")
+                        self.obs_manager.log_error(eval_span, e)
 
             total_latency = (time.time() - total_start) * 1000
 
@@ -173,10 +279,13 @@ class TracedRAGOrchestrator:
             query_analysis=query_analysis,
             retrieved_chunks=retrieved_chunks,
             reranked_chunks=reranked_chunks,
+            reasoning_steps=reasoning_steps,
             response=response,
             concepts=concepts,
             total_latency_ms=total_latency,
             step_latencies=step_latencies,
+            cost_estimate_usd=cost,
+            eval_metrics=eval_metrics,
         )
 
     def _stream_response(
@@ -185,6 +294,7 @@ class TracedRAGOrchestrator:
         query_analysis: QueryAnalysis,
         retrieved_chunks: list[RetrievedChunk],
         reranked_chunks: list[RetrievedChunk],
+        reasoning_steps: list[dict[str, Any]],
         step_latencies: dict[str, float],
         total_start: float,
         skip_graph_extraction: bool,
@@ -193,7 +303,12 @@ class TracedRAGOrchestrator:
     ) -> GenType[str, None, PipelineResult]:
         """Stream response with tracing."""
         step_start = time.time()
-        response_gen = self.orchestrator.generator.generate(query_analysis, reranked_chunks, stream=True)
+        response_gen = self.orchestrator.generator.generate(
+            query_analysis, 
+            reranked_chunks, 
+            reasoning_steps=reasoning_steps, 
+            stream=True
+        )
 
         full_response = ""
         for chunk in response_gen:
@@ -230,11 +345,12 @@ class TracedRAGOrchestrator:
 
         total_latency = (time.time() - total_start) * 1000
 
-        return PipelineResult(
+        yield PipelineResult(
             query=query,
             query_analysis=query_analysis,
             retrieved_chunks=retrieved_chunks,
             reranked_chunks=reranked_chunks,
+            reasoning_steps=reasoning_steps,
             response=response,
             concepts=concepts,
             total_latency_ms=total_latency,

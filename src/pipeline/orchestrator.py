@@ -22,7 +22,9 @@ from .generator import Generator
 from .graph_extractor import GraphExtractor
 from .ingestion import PDFIngestor
 from .query_analyzer import QueryAnalyzer
+from .query_analyzer import QueryAnalyzer
 from .reranker import Reranker
+from .reasoning import ReasoningEngine
 from .retriever import Retriever
 
 
@@ -34,10 +36,14 @@ class PipelineResult:
     query_analysis: QueryAnalysis
     retrieved_chunks: list[RetrievedChunk]
     reranked_chunks: list[RetrievedChunk]
+    reranked_chunks: list[RetrievedChunk]
+    reasoning_steps: list[dict[str, Any]]
     response: GeneratedResponse
     concepts: list[ConceptRelation]
     total_latency_ms: float
     step_latencies: dict[str, float] = field(default_factory=dict)
+    cost_estimate_usd: float = 0.0
+    eval_metrics: dict[str, float] = field(default_factory=dict)
 
 
 class RAGOrchestrator:
@@ -64,6 +70,9 @@ class RAGOrchestrator:
         self.query_analyzer = QueryAnalyzer(self.client)
         self.retriever = Retriever(self.client, persist_directory)
         self.reranker = Reranker(self.client)
+        self.retriever = Retriever(self.client, persist_directory)
+        self.reranker = Reranker(self.client)
+        self.reasoning_engine = ReasoningEngine(self.client)
         self.generator = Generator(self.client)
         self.graph_extractor = GraphExtractor(self.client)
 
@@ -92,6 +101,7 @@ class RAGOrchestrator:
         filter_doc_ids: list[str] | None = None,
         stream: bool = False,
         skip_graph_extraction: bool = False,
+        retrieval_only: bool = False,
     ) -> PipelineResult | GenType[str, None, PipelineResult]:
         """
         Execute the full RAG pipeline.
@@ -115,7 +125,7 @@ class RAGOrchestrator:
 
         # Step 2: Retrieval
         step_start = time.time()
-        retrieved_chunks = self.retriever.retrieve(
+        retrieved_chunks = self.retriever.hybrid_retrieve(
             query_analysis, filter_doc_ids=filter_doc_ids
         )
         step_latencies["retrieval"] = (time.time() - step_start) * 1000
@@ -125,28 +135,52 @@ class RAGOrchestrator:
         reranked_chunks = self.reranker.rerank(query_analysis, retrieved_chunks)
         step_latencies["reranking"] = (time.time() - step_start) * 1000
 
-        # Step 4: Generation
-        step_start = time.time()
-        if stream:
-            return self._stream_response(
-                query,
-                query_analysis,
-                retrieved_chunks,
-                reranked_chunks,
-                step_latencies,
-                total_start,
-                skip_graph_extraction,
-            )
-        else:
-            response = self.generator.generate(query_analysis, reranked_chunks)
-            step_latencies["generation"] = (time.time() - step_start) * 1000
+        step_latencies["reranking"] = (time.time() - step_start) * 1000
 
-        # Step 5: Graph Extraction
+        # Step 4: Reasoning (Agentic Tools)
+        step_start = time.time()
+        reasoning_steps = []
+        if not retrieval_only:
+            reasoning_steps = self.reasoning_engine.run(query_analysis, reranked_chunks)
+        step_latencies["reasoning"] = (time.time() - step_start) * 1000
+
+        # Step 5: Generation
+        step_start = time.time()
+        response = None
         concepts = []
-        if not skip_graph_extraction:
-            step_start = time.time()
-            concepts = self.graph_extractor.extract(response)
-            step_latencies["graph_extraction"] = (time.time() - step_start) * 1000
+
+        if not retrieval_only:
+            if stream:
+                return self._stream_response(
+                    query,
+                    query_analysis,
+                    retrieved_chunks,
+                    reranked_chunks,
+                    reasoning_steps,
+                    step_latencies,
+                    total_start,
+                    skip_graph_extraction,
+                )
+            else:
+                response = self.generator.generate(
+                    query_analysis, reranked_chunks, reasoning_steps=reasoning_steps
+                )
+                step_latencies["generation"] = (time.time() - step_start) * 1000
+
+                # Step 6: Graph Extraction
+                if not skip_graph_extraction:
+                    step_start = time.time()
+                    concepts = self.graph_extractor.extract(response)
+                    step_latencies["graph_extraction"] = (time.time() - step_start) * 1000
+        
+        # If retrieval_only, creating dummy response
+        if retrieval_only:
+             response = GeneratedResponse(
+                 answer="**Retrieval Only Mode**: Generation skipped.",
+                 citations=[],
+                 token_usage={},
+                 model="skipped"
+             )
 
         total_latency = (time.time() - total_start) * 1000
 
@@ -155,6 +189,7 @@ class RAGOrchestrator:
             query_analysis=query_analysis,
             retrieved_chunks=retrieved_chunks,
             reranked_chunks=reranked_chunks,
+            reasoning_steps=reasoning_steps,
             response=response,
             concepts=concepts,
             total_latency_ms=total_latency,
@@ -167,13 +202,19 @@ class RAGOrchestrator:
         query_analysis: QueryAnalysis,
         retrieved_chunks: list[RetrievedChunk],
         reranked_chunks: list[RetrievedChunk],
+        reasoning_steps: list[dict[str, Any]],
         step_latencies: dict[str, float],
         total_start: float,
         skip_graph_extraction: bool,
     ) -> GenType[str, None, PipelineResult]:
         """Stream response and yield chunks."""
         step_start = time.time()
-        response_gen = self.generator.generate(query_analysis, reranked_chunks, stream=True)
+        response_gen = self.generator.generate(
+            query_analysis, 
+            reranked_chunks, 
+            reasoning_steps=reasoning_steps, 
+            stream=True
+        )
 
         full_response = ""
         for chunk in response_gen:
@@ -200,6 +241,7 @@ class RAGOrchestrator:
             query_analysis=query_analysis,
             retrieved_chunks=retrieved_chunks,
             reranked_chunks=reranked_chunks,
+            reasoning_steps=reasoning_steps,
             response=response,
             concepts=concepts,
             total_latency_ms=total_latency,

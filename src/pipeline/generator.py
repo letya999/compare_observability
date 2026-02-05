@@ -17,10 +17,13 @@ Use the context to answer the question accurately. Always cite your sources usin
 Context:
 {context}
 
+Reasoning Context (Tool Outputs):
+{reasoning_context}
+
 Question: {query}
 
 Instructions:
-1. Answer the question based ONLY on the provided context
+1. Answer the question based on the provided context AND reasoning context
 2. If the context doesn't contain enough information, say so
 3. Cite specific chunks using [1], [2], etc. notation
 4. Be concise but comprehensive"""
@@ -37,6 +40,7 @@ class Generator:
         self,
         query_analysis: QueryAnalysis,
         chunks: list[RetrievedChunk],
+        reasoning_steps: list[dict[str, Any]] | None = None,
         stream: bool = False,
     ) -> GeneratedResponse | GenType[str, None, GeneratedResponse]:
         """
@@ -45,6 +49,7 @@ class Generator:
         Args:
             query_analysis: The analyzed query
             chunks: Reranked chunks to use as context
+            reasoning_steps: Optional tool outputs from reasoning engine
             stream: Whether to stream the response
 
         Returns:
@@ -52,6 +57,15 @@ class Generator:
         """
         # Format context
         context = self._format_context(chunks)
+
+        # Format reasoning context
+        reasoning_context = ""
+        if reasoning_steps:
+             for step in reasoning_steps:
+                 reasoning_context += f"- Used tool {step['tool']} with input {step['input']} -> Result: {step['output']}\n"
+        
+        if not reasoning_context:
+            reasoning_context = "No specific tool outputs used."
 
         messages = [
             {
@@ -62,6 +76,7 @@ class Generator:
                 "role": "user",
                 "content": GENERATION_PROMPT.format(
                     context=context,
+                    reasoning_context=reasoning_context,
                     query=query_analysis.original_query,
                 ),
             },

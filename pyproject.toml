@@ -10,6 +10,7 @@ dependencies = [
     "pymupdf>=1.23.0",
     "chromadb>=0.4.22",
     "streamlit>=1.31.0",
+    "rank_bm25>=0.2.2",
 
     # Observability platforms
     "langsmith>=0.1.0",
@@ -22,6 +23,10 @@ dependencies = [
     "agentops>=0.3.0",
     "evidently>=0.4.0",
     "logfire>=0.40.0",
+    "weave>=0.50.0",
+    "opentelemetry-api>=1.20.0",
+    "opentelemetry-sdk>=1.20.0",
+    "opentelemetry-exporter-otlp>=1.20.0",
 
     # LangChain (for testing integrations)
     "langchain>=0.1.0",
@@ -33,6 +38,7 @@ dependencies = [
     "pydantic>=2.5.0",
     "tiktoken>=0.5.0",
     "rich>=13.7.0",
+    "ragas>=0.1.0",
 ]
 
 [project.optional-dependencies]
@@ -52,3 +58,6 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]

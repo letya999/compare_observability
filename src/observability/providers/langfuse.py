@@ -1,24 +1,22 @@
-"""Langfuse observability provider."""
+"""Langfuse observability provider - Updated for Langfuse SDK v3."""
 
 import os
-import uuid
 from contextlib import contextmanager
 from datetime import datetime
 from typing import Any, Generator
+import uuid
 
 from src.observability.base import ObservabilityProvider, SpanContext, SpanType
 
 
 class LangfuseProvider(ObservabilityProvider):
     """
-    Langfuse integration.
+    Langfuse integration using SDK v3 API.
 
-    Features tested:
-    - @observe decorator
-    - trace() / span() / generation() API
-    - Scores and evaluations
-    - Cost tracking
-    - Prompt management
+    Uses:
+    - get_client() singleton
+    - start_as_current_observation() context manager
+    - flush() for ensuring data is sent
     """
 
     name = "langfuse"
@@ -39,62 +37,86 @@ class LangfuseProvider(ObservabilityProvider):
             return False
 
         try:
-            from langfuse import Langfuse
-
-            self.client = Langfuse(
-                public_key=public_key,
-                secret_key=secret_key,
-                host=os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com"),
-            )
-            # Test connection
-            self.client.auth_check()
+            from langfuse import get_client
+            
+            # Set environment variables for the client
+            os.environ["LANGFUSE_PUBLIC_KEY"] = public_key
+            os.environ["LANGFUSE_SECRET_KEY"] = secret_key
+            os.environ["LANGFUSE_HOST"] = os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com")
+            
+            self.client = get_client()
+            
+            # Test connection - try auth_check if available
+            if hasattr(self.client, 'auth_check'):
+                self.client.auth_check()
+            
+            print(f"[Langfuse] Initialized successfully")
             return True
         except ImportError:
             print("[Langfuse] langfuse package not installed")
             return False
         except Exception as e:
-            print(f"[Langfuse] Failed to connect: {e}")
+            print(f"[Langfuse] Failed to initialize: {e}")
             return False
 
     def shutdown(self) -> None:
         """Flush pending data."""
         if self.client:
-            self.client.flush()
+            try:
+                self.client.flush()
+            except Exception as e:
+                print(f"[Langfuse] Error during flush: {e}")
 
     @contextmanager
     def trace(self, name: str, **kwargs) -> Generator[SpanContext, None, None]:
-        """Start a new trace."""
+        """Start a new trace using start_as_current_observation."""
         trace_id = str(uuid.uuid4())
-
-        trace = self.client.trace(
-            id=trace_id,
-            name=name,
-            input=kwargs.get("inputs"),
-            metadata=kwargs.get("metadata"),
-        )
-
-        self._active_traces[trace_id] = trace
-
-        span = SpanContext(
-            name=name,
-            span_type=SpanType.TRACE,
-            trace_id=trace_id,
-            span_id=trace_id,
-            start_time=datetime.now(),
-            metadata={"langfuse_trace": trace},
-        )
-
+        
         try:
-            yield span
-            trace.update(output=span.outputs)
+            # Use the new SDK v3 API
+            with self.client.start_as_current_observation(
+                as_type="span",
+                name=name,
+                input=kwargs.get("inputs"),
+                metadata=kwargs.get("metadata"),
+            ) as langfuse_span:
+                
+                self._active_traces[trace_id] = langfuse_span
+                
+                span = SpanContext(
+                    name=name,
+                    span_type=SpanType.TRACE,
+                    trace_id=trace_id,
+                    span_id=trace_id,
+                    start_time=datetime.now(),
+                    metadata={"langfuse_span": langfuse_span},
+                )
+                
+                try:
+                    yield span
+                    langfuse_span.update(output=span.outputs)
+                except Exception as e:
+                    langfuse_span.update(
+                        output={"error": str(e)},
+                        level="ERROR",
+                        status_message=str(e)
+                    )
+                    raise
+                finally:
+                    self._active_traces.pop(trace_id, None)
+                    
         except Exception as e:
-            trace.update(
-                output={"error": str(e)},
-                level="ERROR",
+            # Fallback if SDK API is different
+            print(f"[Langfuse] Error starting trace: {e}")
+            span = SpanContext(
+                name=name,
+                span_type=SpanType.TRACE,
+                trace_id=trace_id,
+                span_id=trace_id,
+                start_time=datetime.now(),
+                metadata={},
             )
-            raise
-        finally:
-            self._active_traces.pop(trace_id, None)
+            yield span
 
     @contextmanager
     def span(
@@ -107,53 +129,58 @@ class LangfuseProvider(ObservabilityProvider):
         """Create a span within a trace."""
         span_id = str(uuid.uuid4())
         trace_id = parent.trace_id if parent else span_id
-
-        # Get parent trace or span
-        langfuse_parent = None
-        if parent and "langfuse_trace" in parent.metadata:
-            langfuse_parent = parent.metadata["langfuse_trace"]
-        elif parent and "langfuse_span" in parent.metadata:
-            langfuse_parent = parent.metadata["langfuse_span"]
-
-        # Create appropriate Langfuse object based on span type
+        
+        # Determine observation type based on span_type
         if span_type == SpanType.LLM:
-            langfuse_obj = (langfuse_parent or self.client).generation(
-                id=span_id,
-                name=name,
-                input=kwargs.get("inputs"),
-                metadata=kwargs.get("metadata"),
-            )
+            as_type = "generation"
         else:
-            langfuse_obj = (langfuse_parent or self.client).span(
-                id=span_id,
+            as_type = "span"
+        
+        try:
+            with self.client.start_as_current_observation(
+                as_type=as_type,
                 name=name,
                 input=kwargs.get("inputs"),
                 metadata=kwargs.get("metadata"),
-            )
-
-        span = SpanContext(
-            name=name,
-            span_type=span_type,
-            trace_id=trace_id,
-            span_id=span_id,
-            parent_span_id=parent.span_id if parent else None,
-            start_time=datetime.now(),
-            metadata={
-                "langfuse_span": langfuse_obj,
-                "langfuse_trace": parent.metadata.get("langfuse_trace") if parent else None,
-            },
-        )
-
-        try:
-            yield span
-            langfuse_obj.end(output=span.outputs)
+                model=kwargs.get("model") if span_type == SpanType.LLM else None,
+            ) as langfuse_obj:
+                
+                span = SpanContext(
+                    name=name,
+                    span_type=span_type,
+                    trace_id=trace_id,
+                    span_id=span_id,
+                    parent_span_id=parent.span_id if parent else None,
+                    start_time=datetime.now(),
+                    metadata={
+                        "langfuse_span": langfuse_obj,
+                    },
+                )
+                
+                try:
+                    yield span
+                    langfuse_obj.update(output=span.outputs)
+                except Exception as e:
+                    span.error = str(e)
+                    langfuse_obj.update(
+                        output={"error": str(e)},
+                        level="ERROR",
+                        status_message=str(e)
+                    )
+                    raise
+                    
         except Exception as e:
-            span.error = str(e)
-            langfuse_obj.end(
-                output={"error": str(e)},
-                level="ERROR",
+            print(f"[Langfuse] Error in span: {e}")
+            span = SpanContext(
+                name=name,
+                span_type=span_type,
+                trace_id=trace_id,
+                span_id=span_id,
+                parent_span_id=parent.span_id if parent else None,
+                start_time=datetime.now(),
+                metadata={},
             )
-            raise
+            yield span
 
     def log_llm_call(
         self,
@@ -188,12 +215,15 @@ class LangfuseProvider(ObservabilityProvider):
 
         span.outputs = {"content": output_content}
 
-        langfuse_obj.update(
-            model=model,
-            input=messages,
-            output=output_content,
-            usage=usage,
-        )
+        try:
+            langfuse_obj.update(
+                model=model,
+                input=messages,
+                output=output_content,
+                usage=usage,
+            )
+        except Exception as e:
+            print(f"[Langfuse] Error logging LLM call: {e}")
 
     def log_retrieval(
         self,
@@ -211,20 +241,26 @@ class LangfuseProvider(ObservabilityProvider):
 
         langfuse_obj = span.metadata.get("langfuse_span")
         if langfuse_obj:
-            langfuse_obj.update(
-                input={"query": query},
-                output={"documents": documents, "scores": scores},
-            )
+            try:
+                langfuse_obj.update(
+                    input={"query": query},
+                    output={"documents": documents, "scores": scores},
+                )
+            except Exception as e:
+                print(f"[Langfuse] Error logging retrieval: {e}")
 
     def log_error(self, span: SpanContext, error: Exception) -> None:
         """Log error."""
         span.error = str(error)
         langfuse_obj = span.metadata.get("langfuse_span")
         if langfuse_obj:
-            langfuse_obj.update(
-                level="ERROR",
-                status_message=str(error),
-            )
+            try:
+                langfuse_obj.update(
+                    level="ERROR",
+                    status_message=str(error),
+                )
+            except Exception as e:
+                print(f"[Langfuse] Error logging error: {e}")
 
     def get_trace_url(self, trace_id: str) -> str | None:
         """Get URL to view trace in Langfuse."""

@@ -4,6 +4,7 @@ import json
 from openai import OpenAI
 
 from src.config import config
+from src.logger import logger
 from src.models import QueryAnalysis, QueryIntent
 
 
@@ -14,12 +15,12 @@ QUERY_ANALYSIS_PROMPT = """Analyze the following user query and extract:
 4. Expanded query: A reformulated version that might retrieve better results
 
 Respond in JSON format:
-{
+{{
     "intent": "factual|comparison|summary|explanation|unknown",
     "entities": ["entity1", "entity2"],
     "keywords": ["keyword1", "keyword2"],
     "expanded_query": "reformulated query for better retrieval"
-}
+}}
 
 User query: {query}"""
 
@@ -56,19 +57,43 @@ class QueryAnalyzer:
             response_format={"type": "json_object"},
         )
 
-        result = json.loads(response.choices[0].message.content)
+
+        try:
+            result = json.loads(response.choices[0].message.content)
+            logger.info(f"Query analysis result: {result}")
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse query analysis JSON. Raw content: {response.choices[0].message.content}")
+            logger.error(f"JSON Error: {e}")
+            # Fallback to defaults
+            return QueryAnalysis(
+                original_query=query,
+                intent=QueryIntent.UNKNOWN,
+                entities=[],
+                keywords=[],
+                expanded_query=query
+            )
 
         intent_map = {
             "factual": QueryIntent.FACTUAL,
             "comparison": QueryIntent.COMPARISON,
             "summary": QueryIntent.SUMMARY,
             "explanation": QueryIntent.EXPLANATION,
+            "unknown": QueryIntent.UNKNOWN,
         }
+
+        # Clean up keys if necessary (handle potential whitespace issues from LLM)
+        cleaned_result = {k.strip(): v for k, v in result.items()} if isinstance(result, dict) else {}
+        
+        intent_str = cleaned_result.get("intent", "unknown")
+        if isinstance(intent_str, str):
+            intent_str = intent_str.lower().strip()
+            
+        intent_enum = intent_map.get(intent_str, QueryIntent.UNKNOWN)
 
         return QueryAnalysis(
             original_query=query,
-            intent=intent_map.get(result.get("intent", "unknown"), QueryIntent.UNKNOWN),
-            entities=result.get("entities", []),
-            keywords=result.get("keywords", []),
-            expanded_query=result.get("expanded_query"),
+            intent=intent_enum,
+            entities=cleaned_result.get("entities", []),
+            keywords=cleaned_result.get("keywords", []),
+            expanded_query=cleaned_result.get("expanded_query"),
         )

@@ -1,0 +1,38 @@
+services:
+  app:
+    build: .
+    container_name: pdf-knowledge-rag
+    ports:
+      - "8601:8501"
+    environment:
+      - CHROMA_HOST=chroma-server-rag
+      - CHROMA_PORT=8000
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OBSERVABILITY_PROVIDERS=${OBSERVABILITY_PROVIDERS:-}
+      - LANGSMITH_API_KEY=${LANGSMITH_API_KEY:-}
+      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
+      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
+      - HONEYCOMB_API_KEY=${HONEYCOMB_API_KEY:-}
+      - OTEL_SERVICE_NAME=pdf-knowledge-rag
+    volumes:
+      - ./data/pdfs:/app/data/pdfs
+      - ./src:/app/src
+      - ./app.py:/app/app.py
+      - ./scenarios:/app/scenarios
+    depends_on:
+      - chroma-server-rag
+    restart: unless-stopped
+
+  chroma-server-rag:
+    image: chromadb/chroma:latest
+    container_name: chroma-server-rag
+    ports:
+      - "8100:8000"
+    volumes:
+      - chroma_data:/chroma/chroma
+    environment:
+      - IS_PERSISTENT=TRUE
+    restart: unless-stopped
+
+volumes:
+  chroma_data:

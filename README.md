@@ -25,11 +25,29 @@ This project implements a PDF Knowledge Explorer that allows you to:
 | 9 | Pydantic Logfire | `logfire` | logfire.instrument_openai() + @span |
 
 ## Architecture
-
-```
-PDF Upload  Ingest (chunking + embedding)  ChromaDB
-
-User Query  [1] Query Analyzer  [2] Retriever  [3] Reranker  [4] Generator  [5] Graph Extractor  Response
+```mermaid
+graph TD
+    User[User] -->|Query| QA[Query Analyzer]
+    QA -->|Analyzed Query| RE[Retriever]
+    
+    subgraph "Hybrid Retrieval"
+        RE -->|Vector Search| VS[ChromaDB]
+        RE -->|Keyword Search| BM25[BM25 Index]
+        VS -->|Results| RRF[RRF Merge]
+        BM25 -->|Results| RRF
+    end
+    
+    RRF -->|Ranked Chunks| RR[Reranker]
+    RR -->|Reranked Context| AG[Reasoning Engine]
+    
+    subgraph "Agentic Logic"
+        AG -->|Loop| Tools[Tools: Calc, Search]
+        Tools -->|Output| AG
+    end
+    
+    AG -->|Augmented Context| GEN[Generator]
+    GEN -->|Response| GE[Graph Extractor]
+    GE -->|Final Output| User
 ```
 
 ### Pipeline Steps
