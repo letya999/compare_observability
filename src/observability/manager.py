@@ -42,6 +42,10 @@ class ObservabilityManager:
         self.provider_names = providers or config.observability_providers
 
         self._initialize_providers()
+        
+        # Register shutdown to be called on program exit (critical for Streamlit)
+        import atexit
+        atexit.register(self.shutdown)
 
     def _initialize_providers(self) -> None:
         """Initialize all configured providers."""
@@ -84,22 +88,24 @@ class ObservabilityManager:
         multi_span = MultiProviderSpan(name=name, span_type=SpanType.TRACE)
 
         # Start trace in all providers
-        provider_contexts = {}
+        # We need to track BOTH the context manager AND the span it yields
+        provider_context_managers = {}  # pname -> context manager object
         for pname, provider in self.active_providers.items():
             try:
-                ctx = provider.trace(name, **kwargs)
-                provider_contexts[pname] = ctx.__enter__()
-                multi_span.provider_spans[pname] = provider_contexts[pname]
+                ctx_manager = provider.trace(name, **kwargs)
+                provider_context_managers[pname] = ctx_manager
+                span_ctx = ctx_manager.__enter__()
+                multi_span.provider_spans[pname] = span_ctx
             except Exception as e:
                 print(f"[Observability] Error starting trace in {pname}: {e}")
 
         try:
             yield multi_span
         finally:
-            # End trace in all providers
-            for pname, ctx in provider_contexts.items():
+            # End trace in all providers - use the SAME context manager we started
+            for pname, ctx_manager in provider_context_managers.items():
                 try:
-                    self.active_providers[pname].trace(name, **kwargs).__exit__(None, None, None)
+                    ctx_manager.__exit__(None, None, None)
                 except Exception as e:
                     print(f"[Observability] Error ending trace in {pname}: {e}")
 
@@ -114,23 +120,25 @@ class ObservabilityManager:
         """Create a span across all active providers."""
         multi_span = MultiProviderSpan(name=name, span_type=span_type)
 
-        provider_contexts = {}
+        # Track context managers separately from spans
+        provider_context_managers = {}  # pname -> context manager object
         for pname, provider in self.active_providers.items():
             try:
                 parent_span = parent.provider_spans.get(pname) if parent else None
-                ctx = provider.span(name, span_type, parent_span, **kwargs)
-                provider_contexts[pname] = ctx.__enter__()
-                multi_span.provider_spans[pname] = provider_contexts[pname]
+                ctx_manager = provider.span(name, span_type, parent_span, **kwargs)
+                provider_context_managers[pname] = ctx_manager
+                span_ctx = ctx_manager.__enter__()
+                multi_span.provider_spans[pname] = span_ctx
             except Exception as e:
                 print(f"[Observability] Error starting span in {pname}: {e}")
 
         try:
             yield multi_span
         finally:
-            for pname, ctx in provider_contexts.items():
+            # End span in all providers - use the SAME context manager we started
+            for pname, ctx_manager in provider_context_managers.items():
                 try:
-                    provider = self.active_providers[pname]
-                    provider.span(name, span_type).__exit__(None, None, None)
+                    ctx_manager.__exit__(None, None, None)
                 except Exception as e:
                     print(f"[Observability] Error ending span in {pname}: {e}")
 

@@ -19,6 +19,12 @@ class LangSmithProvider(ObservabilityProvider):
     - LangChain callbacks
     - Prompt hub integration
     - Evaluations
+    
+    Environment variables (new LANGSMITH_* preferred, LANGCHAIN_* still supported):
+    - LANGSMITH_TRACING / LANGCHAIN_TRACING_V2: Enable tracing
+    - LANGSMITH_API_KEY / LANGCHAIN_API_KEY: API key
+    - LANGSMITH_PROJECT / LANGCHAIN_PROJECT: Project name
+    - LANGSMITH_ENDPOINT: Custom endpoint (optional)
     """
 
     name = "langsmith"
@@ -27,14 +33,22 @@ class LangSmithProvider(ObservabilityProvider):
 
     def __init__(self):
         self.client = None
-        self.project_name = os.getenv("LANGCHAIN_PROJECT", "pdf-knowledge-rag")
+        # Check both new LANGSMITH_* and legacy LANGCHAIN_* prefixes
+        self.project_name = os.getenv("LANGSMITH_PROJECT") or os.getenv("LANGCHAIN_PROJECT", "compare-observability")
 
     def initialize(self) -> bool:
         """Initialize LangSmith client."""
-        api_key = os.getenv("LANGCHAIN_API_KEY")
+        # Check for API key with both naming conventions
+        api_key = os.getenv("LANGSMITH_API_KEY") or os.getenv("LANGCHAIN_API_KEY")
         if not api_key:
-            print("[LangSmith] No API key found (LANGCHAIN_API_KEY)")
+            print("[LangSmith] No API key found (LANGSMITH_API_KEY or LANGCHAIN_API_KEY)")
             return False
+        
+        # Ensure tracing is enabled
+        tracing_enabled = os.getenv("LANGSMITH_TRACING", "").lower() == "true" or \
+                          os.getenv("LANGCHAIN_TRACING_V2", "").lower() == "true"
+        if not tracing_enabled:
+            print("[LangSmith] Warning: Tracing not enabled. Set LANGSMITH_TRACING=true")
 
         try:
             from langsmith import Client
@@ -42,6 +56,7 @@ class LangSmithProvider(ObservabilityProvider):
             self.client = Client()
             # Test connection
             self.client.list_projects(limit=1)
+            print(f"[LangSmith] Initialized successfully (project: {self.project_name})")
             return True
         except ImportError:
             print("[LangSmith] langsmith package not installed")
@@ -66,6 +81,7 @@ class LangSmithProvider(ObservabilityProvider):
             run_type="chain",
             project_name=self.project_name,
             id=trace_id,
+            client=self.client,
             inputs=kwargs.get("inputs", {}),
         )
 
@@ -123,6 +139,7 @@ class LangSmithProvider(ObservabilityProvider):
                 name=name,
                 run_type=run_type,
                 project_name=self.project_name,
+                client=self.client,
                 inputs=kwargs.get("inputs", {}),
             )
 

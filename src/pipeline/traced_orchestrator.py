@@ -274,19 +274,27 @@ class TracedRAGOrchestrator:
             # Get trace URLs for all providers
             trace_urls = self.obs_manager.get_trace_urls(trace)
 
-        return PipelineResult(
-            query=query,
-            query_analysis=query_analysis,
-            retrieved_chunks=retrieved_chunks,
-            reranked_chunks=reranked_chunks,
-            reasoning_steps=reasoning_steps,
-            response=response,
-            concepts=concepts,
-            total_latency_ms=total_latency,
-            step_latencies=step_latencies,
-            cost_estimate_usd=cost,
-            eval_metrics=eval_metrics,
-        )
+            result = PipelineResult(
+                query=query,
+                query_analysis=query_analysis,
+                retrieved_chunks=retrieved_chunks,
+                reranked_chunks=reranked_chunks,
+                reasoning_steps=reasoning_steps,
+                response=response,
+                concepts=concepts,
+                total_latency_ms=total_latency,
+                step_latencies=step_latencies,
+                cost_estimate_usd=cost,
+                eval_metrics=eval_metrics,
+            )
+
+            # Update trace output with the final answer
+            trace.provider_spans = {
+                k: self._update_outputs(v, {"answer": result.response.answer if result.response else ""})
+                for k, v in trace.provider_spans.items()
+            }
+
+            return result
 
     def _stream_response(
         self,
@@ -311,6 +319,8 @@ class TracedRAGOrchestrator:
         )
 
         full_response = ""
+        response = None  # Initialize response
+        
         for chunk in response_gen:
             if isinstance(chunk, str):
                 full_response += chunk
@@ -319,6 +329,17 @@ class TracedRAGOrchestrator:
                 response = chunk
 
         step_latencies["generation"] = (time.time() - step_start) * 1000
+
+        # If no response object was yielded, create one from accumulated text
+        if response is None:
+            response = GeneratedResponse(
+                answer=full_response,
+                citations=[],
+                concepts=[],
+                token_usage={},
+                latency_ms=step_latencies["generation"],
+                tool_calls=[]
+            )
 
         # Log the streaming response
         self.obs_manager.log_llm_call(

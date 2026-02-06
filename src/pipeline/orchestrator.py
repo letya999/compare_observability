@@ -22,7 +22,7 @@ from .generator import Generator
 from .graph_extractor import GraphExtractor
 from .ingestion import PDFIngestor
 from .query_analyzer import QueryAnalyzer
-from .query_analyzer import QueryAnalyzer
+
 from .reranker import Reranker
 from .reasoning import ReasoningEngine
 from .retriever import Retriever
@@ -36,7 +36,7 @@ class PipelineResult:
     query_analysis: QueryAnalysis
     retrieved_chunks: list[RetrievedChunk]
     reranked_chunks: list[RetrievedChunk]
-    reranked_chunks: list[RetrievedChunk]
+
     reasoning_steps: list[dict[str, Any]]
     response: GeneratedResponse
     concepts: list[ConceptRelation]
@@ -70,8 +70,7 @@ class RAGOrchestrator:
         self.query_analyzer = QueryAnalyzer(self.client)
         self.retriever = Retriever(self.client, persist_directory)
         self.reranker = Reranker(self.client)
-        self.retriever = Retriever(self.client, persist_directory)
-        self.reranker = Reranker(self.client)
+
         self.reasoning_engine = ReasoningEngine(self.client)
         self.generator = Generator(self.client)
         self.graph_extractor = GraphExtractor(self.client)
@@ -125,8 +124,12 @@ class RAGOrchestrator:
 
         # Step 2: Retrieval
         step_start = time.time()
+        # Increase retrieval candidates for better recall before reranking
+        retrieval_limit = config.top_k * 4
         retrieved_chunks = self.retriever.hybrid_retrieve(
-            query_analysis, filter_doc_ids=filter_doc_ids
+            query_analysis, 
+            filter_doc_ids=filter_doc_ids,
+            top_k=retrieval_limit,
         )
         step_latencies["retrieval"] = (time.time() - step_start) * 1000
 
@@ -135,7 +138,7 @@ class RAGOrchestrator:
         reranked_chunks = self.reranker.rerank(query_analysis, retrieved_chunks)
         step_latencies["reranking"] = (time.time() - step_start) * 1000
 
-        step_latencies["reranking"] = (time.time() - step_start) * 1000
+
 
         # Step 4: Reasoning (Agentic Tools)
         step_start = time.time()

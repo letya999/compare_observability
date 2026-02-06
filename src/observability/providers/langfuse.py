@@ -17,6 +17,12 @@ class LangfuseProvider(ObservabilityProvider):
     - get_client() singleton
     - start_as_current_observation() context manager
     - flush() for ensuring data is sent
+    
+    Environment variables:
+    - LANGFUSE_PUBLIC_KEY: Public API key
+    - LANGFUSE_SECRET_KEY: Secret API key
+    - LANGFUSE_BASE_URL / LANGFUSE_HOST: API endpoint (default: https://cloud.langfuse.com)
+    - LANGFUSE_ENVIRONMENT: Environment tag (e.g., "production", "staging")
     """
 
     name = "langfuse"
@@ -40,9 +46,17 @@ class LangfuseProvider(ObservabilityProvider):
             from langfuse import get_client
             
             # Set environment variables for the client
+            # Support both LANGFUSE_BASE_URL (preferred) and LANGFUSE_HOST (legacy)
             os.environ["LANGFUSE_PUBLIC_KEY"] = public_key
             os.environ["LANGFUSE_SECRET_KEY"] = secret_key
-            os.environ["LANGFUSE_HOST"] = os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com")
+            
+            base_url = os.getenv("LANGFUSE_BASE_URL") or os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com")
+            os.environ["LANGFUSE_HOST"] = base_url
+            
+            # Set environment if specified (for trace organization)
+            environment = os.getenv("LANGFUSE_ENVIRONMENT")
+            if environment:
+                os.environ["LANGFUSE_TRACING_ENVIRONMENT"] = environment
             
             self.client = get_client()
             
@@ -50,7 +64,7 @@ class LangfuseProvider(ObservabilityProvider):
             if hasattr(self.client, 'auth_check'):
                 self.client.auth_check()
             
-            print(f"[Langfuse] Initialized successfully")
+            print(f"[Langfuse] Initialized successfully (host: {base_url})")
             return True
         except ImportError:
             print("[Langfuse] langfuse package not installed")

@@ -36,7 +36,7 @@ class Config:
 
     # Retrieval
     top_k: int = 5
-    rerank_top_k: int = 3
+    rerank_top_k: int = 5
 
     # Observability
     observability_providers: list[ObservabilityProvider] = field(default_factory=list)

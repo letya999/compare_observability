@@ -38,10 +38,13 @@ class BraintrustProvider(ObservabilityProvider):
         try:
             import braintrust
 
+            project_name = os.getenv("BRAINTRUST_PROJECT", "compare-observability")
+
             self.logger = braintrust.init_logger(
-                project="pdf-knowledge-rag",
+                project=project_name,
                 api_key=api_key,
             )
+            print(f"[Braintrust] Initialized successfully (project: {project_name})")
             return True
         except ImportError:
             print("[Braintrust] braintrust package not installed")

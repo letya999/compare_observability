@@ -1,7 +1,6 @@
-"""Arize Phoenix observability provider."""
+"""Arize AX observability provider (2026 version)."""
 
 import os
-import uuid
 from contextlib import contextmanager
 from datetime import datetime
 from typing import Any, Generator
@@ -11,13 +10,9 @@ from src.observability.base import ObservabilityProvider, SpanContext, SpanType
 
 class ArizePhoenixProvider(ObservabilityProvider):
     """
-    Arize Phoenix integration.
-
-    Features tested:
-    - OpenTelemetry-based instrumentation
-    - OpenInference semantic conventions
-    - Auto-instrumentation for OpenAI
-    - Local + cloud deployment
+    Arize AX integration using arize.otel.register() (current 2026 method).
+    
+    Official docs: https://arize.com/docs/ax/observe/tracing/setup/manual-instrumentation
     """
 
     name = "arize"
@@ -25,71 +20,56 @@ class ArizePhoenixProvider(ObservabilityProvider):
     supports_async = True
 
     def __init__(self):
+        self.tracer_provider = None
         self.tracer = None
-        self._active_spans = {}
 
     def initialize(self) -> bool:
-        """Initialize Phoenix with OpenTelemetry."""
+        """Initialize Arize using arize.otel.register()."""
         try:
-            from opentelemetry import trace
-            from opentelemetry.sdk.trace import TracerProvider
-            from opentelemetry.sdk.trace.export import BatchSpanProcessor
-
-            # Check if using cloud or local
-            api_key = os.getenv("PHOENIX_API_KEY")
-            endpoint = os.getenv(
-                "PHOENIX_COLLECTOR_ENDPOINT",
-                "https://app.phoenix.arize.com"
+            from arize.otel import register
+            
+            # Get configuration
+            space_id = os.getenv("ARIZE_SPACE_ID")
+            api_key = os.getenv("ARIZE_API_KEY")
+            
+            if not space_id or not api_key:
+                print("[Arize] Missing ARIZE_SPACE_ID or ARIZE_API_KEY")
+                return False
+            
+            # Get project name
+            project_name = os.getenv("ARIZE_PROJECT_NAME", "compare-observability")
+            
+            # Use arize.otel.register() - the official 2026 way
+            self.tracer_provider = register(
+                space_id=space_id,
+                api_key=api_key,
+                project_name=project_name,
             )
-
-            if api_key:
-                # Cloud setup
-                from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-
-                exporter = OTLPSpanExporter(
-                    endpoint=f"{endpoint}/v1/traces",
-                    headers={"api_key": api_key},
-                )
-            else:
-                # Try local Phoenix
-                try:
-                    from phoenix.otel import register
-                    register()
-                    self.tracer = trace.get_tracer(__name__)
-                    return True
-                except Exception:
-                    print("[Phoenix] No API key and local Phoenix not available")
-                    return False
-
-            provider = TracerProvider()
-            provider.add_span_processor(BatchSpanProcessor(exporter))
-            trace.set_tracer_provider(provider)
-
-            self.tracer = trace.get_tracer(__name__)
+            
+            self.tracer = self.tracer_provider.get_tracer(__name__)
+            
+            print(f"[Arize] Initialized successfully (space: {space_id}, project: {project_name})")
             return True
-
+            
         except ImportError as e:
-            print(f"[Phoenix] Missing dependencies: {e}")
+            print(f"[Arize] Missing dependencies: {e}")
+            print("[Arize] Install with: pip install arize-otel openinference-instrumentation-openai")
             return False
         except Exception as e:
-            print(f"[Phoenix] Failed to initialize: {e}")
+            print(f"[Arize] Failed to initialize: {e}")
             return False
 
     def shutdown(self) -> None:
         """Flush spans."""
         try:
-            from opentelemetry import trace
-            provider = trace.get_tracer_provider()
-            if hasattr(provider, 'force_flush'):
-                provider.force_flush()
+            if self.tracer_provider and hasattr(self.tracer_provider, 'force_flush'):
+                self.tracer_provider.force_flush()
         except Exception:
             pass
 
     @contextmanager
     def trace(self, name: str, **kwargs) -> Generator[SpanContext, None, None]:
         """Start a new trace using OpenTelemetry."""
-        trace_id = str(uuid.uuid4())
-
         with self.tracer.start_as_current_span(name) as otel_span:
             # Set OpenInference attributes
             otel_span.set_attribute("openinference.span.kind", "CHAIN")
@@ -111,8 +91,9 @@ class ArizePhoenixProvider(ObservabilityProvider):
                 if span.outputs:
                     otel_span.set_attribute("output.value", str(span.outputs))
             except Exception as e:
+                from opentelemetry.trace import Status, StatusCode
                 otel_span.record_exception(e)
-                otel_span.set_status(trace.StatusCode.ERROR, str(e))
+                otel_span.set_status(Status(StatusCode.ERROR, str(e)))
                 raise
 
     @contextmanager
@@ -233,12 +214,9 @@ class ArizePhoenixProvider(ObservabilityProvider):
             otel_span.record_exception(error)
 
     def get_trace_url(self, trace_id: str) -> str | None:
-        """Get URL to view trace."""
-        endpoint = os.getenv(
-            "PHOENIX_COLLECTOR_ENDPOINT",
-            "https://app.phoenix.arize.com"
-        )
-        return f"{endpoint}/tracing/trace/{trace_id}"
+        """Get URL to view trace in Arize AX."""
+        space_id = os.getenv("ARIZE_SPACE_ID", "")
+        return f"https://arize.com/spaces/{space_id}/tracing/{trace_id}"
 
     def supports_feature(self, feature: str) -> bool:
         """Check feature support."""
@@ -246,7 +224,7 @@ class ArizePhoenixProvider(ObservabilityProvider):
             "streaming": True,
             "async": True,
             "nested_spans": True,
-            "cost_tracking": False,  # Manual
+            "cost_tracking": False,
             "evaluations": True,
             "auto_instrumentation": True,
             "opentelemetry": True,

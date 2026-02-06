@@ -12,7 +12,9 @@ QUERY_ANALYSIS_PROMPT = """Analyze the following user query and extract:
 1. Intent: What type of question is this? (factual, comparison, summary, explanation, unknown)
 2. Entities: Key entities or concepts mentioned
 3. Keywords: Important search keywords
-4. Expanded query: A reformulated version that might retrieve better results
+4. Expanded query: A reformulated version that might retrieve better results. 
+   IMPORTANT: Do NOT hallucinate or add specific source names (like book titles, movie names, specific documents) to the expanded query unless they are explicitly mentioned in the user query.
+   If the query is about a character or event, do not guess the book/source. Keep it general if unknown.
 
 Respond in JSON format:
 {{

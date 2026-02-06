@@ -18,6 +18,12 @@ class OpikProvider(ObservabilityProvider):
     - Manual tracing API
     - Evaluations
     - Prompt versioning
+    
+    Environment variables:
+    - OPIK_API_KEY: API key for authentication
+    - OPIK_WORKSPACE: Workspace name
+    - OPIK_URL_OVERRIDE: API endpoint (default: https://www.comet.com/opik/api)
+    - OPIK_PROJECT_NAME: Project name for organizing traces
     """
 
     name = "opik"
@@ -26,6 +32,7 @@ class OpikProvider(ObservabilityProvider):
 
     def __init__(self):
         self.client = None
+        self.project_name = os.getenv("OPIK_PROJECT_NAME", "compare-observability")
 
     def initialize(self) -> bool:
         """Initialize Opik client."""
@@ -36,12 +43,23 @@ class OpikProvider(ObservabilityProvider):
 
         try:
             import opik
-
-            opik.configure(
-                api_key=api_key,
-                workspace=os.getenv("OPIK_WORKSPACE", "default"),
-            )
-            self.client = opik.Opik()
+            
+            # Configure Opik with all available settings
+            workspace = os.getenv("OPIK_WORKSPACE", "default")
+            url_override = os.getenv("OPIK_URL_OVERRIDE")
+            
+            config_kwargs = {
+                "api_key": api_key,
+                "workspace": workspace,
+            }
+            
+            # Add URL override if specified (for cloud or self-hosted)
+            if url_override:
+                config_kwargs["url"] = url_override
+            
+            opik.configure(**config_kwargs)
+            self.client = opik.Opik(project_name=self.project_name)
+            print(f"[Opik] Initialized successfully (workspace: {workspace}, project: {self.project_name})")
             return True
         except ImportError:
             print("[Opik] opik package not installed")
@@ -97,10 +115,11 @@ class OpikProvider(ObservabilityProvider):
         opik_trace = parent.metadata.get("opik_trace") if parent else None
         opik_parent = parent.metadata.get("opik_span") if parent else None
 
-        # Map span type
+        # Map span type to Opik types: general, tool, llm, guardrail
+        # Note: Opik doesn't have 'retriever' type, use 'general' instead
         type_map = {
             SpanType.LLM: "llm",
-            SpanType.RETRIEVER: "retriever",
+            SpanType.RETRIEVER: "general",  # Opik doesn't support 'retriever'
             SpanType.CHAIN: "general",
             SpanType.TOOL: "tool",
             SpanType.EMBEDDING: "general",
