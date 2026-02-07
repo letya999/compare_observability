@@ -4,21 +4,18 @@ services:
     container_name: pdf-knowledge-rag
     ports:
       - "8601:8501"
+    env_file:
+      - .env
     environment:
       - CHROMA_HOST=chroma-server-rag
       - CHROMA_PORT=8000
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - OBSERVABILITY_PROVIDERS=${OBSERVABILITY_PROVIDERS:-}
-      - LANGSMITH_API_KEY=${LANGSMITH_API_KEY:-}
-      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
-      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
-      - HONEYCOMB_API_KEY=${HONEYCOMB_API_KEY:-}
       - OTEL_SERVICE_NAME=pdf-knowledge-rag
     volumes:
       - ./data/pdfs:/app/data/pdfs
       - ./src:/app/src
       - ./app.py:/app/app.py
       - ./scenarios:/app/scenarios
+      - ./.env:/app/.env # Mount .env so app can read it directly too
     depends_on:
       - chroma-server-rag
     restart: unless-stopped

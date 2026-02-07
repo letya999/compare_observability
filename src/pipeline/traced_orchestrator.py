@@ -70,6 +70,8 @@ class TracedRAGOrchestrator:
         skip_graph_extraction: bool = False,
         run_evals: bool = False,
         retrieval_only: bool = False,
+        user_id: str | None = None,
+        session_id: str | None = None,
     ) -> PipelineResult | GenType[str, None, PipelineResult]:
         """
         Execute the full RAG pipeline with tracing.
@@ -79,7 +81,12 @@ class TracedRAGOrchestrator:
         total_start = time.time()
         step_latencies = {}
 
-        with self.obs_manager.trace("rag_query", inputs={"query": query}) as trace:
+        with self.obs_manager.trace(
+            "rag_query", 
+            inputs={"query": query},
+            user_id=user_id,
+            session_id=session_id
+        ) as trace:
             # Step 1: Query Analysis
             with self.obs_manager.span("query_analyzer", SpanType.LLM, trace, inputs={"query": query}) as qa_span:
                 step_start = time.time()

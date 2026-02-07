@@ -56,7 +56,14 @@ class BraintrustProvider(ObservabilityProvider):
     def shutdown(self) -> None:
         """Flush pending data."""
         if self.logger:
-            self.logger.flush()
+            try:
+                self.logger.flush()
+                # Give it time to send the data
+                import time
+                time.sleep(0.5)
+                print("[Braintrust] Flushed all pending spans")
+            except Exception as e:
+                print(f"[Braintrust] Error flushing: {e}")
 
     @contextmanager
     def trace(self, name: str, **kwargs) -> Generator[SpanContext, None, None]:

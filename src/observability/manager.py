@@ -39,6 +39,7 @@ class ObservabilityManager:
 
     def __init__(self, providers: list[ProviderName] | None = None):
         self.active_providers: dict[str, ObservabilityProvider] = {}
+        self.init_errors: dict[str, str] = {}  # Store initialization errors
         self.provider_names = providers or config.observability_providers
 
         self._initialize_providers()
@@ -49,30 +50,66 @@ class ObservabilityManager:
 
     def _initialize_providers(self) -> None:
         """Initialize all configured providers."""
-        from .providers import PROVIDER_CLASSES
+        # Map names to classes
+        from .providers.arize import ArizePhoenixProvider
+        from .providers.langsmith import LangSmithProvider
+        from .providers.langfuse import LangfuseProvider
+        from .providers.opik import OpikProvider
+        from .providers.braintrust import BraintrustProvider
 
-        for provider_name in self.provider_names:
-            if provider_name in PROVIDER_CLASSES:
-                provider_class = PROVIDER_CLASSES[provider_name]
-                provider = provider_class()
+        provider_classes = {
+            "langsmith": LangSmithProvider,
+            "langfuse": LangfuseProvider,
+            "arize": ArizePhoenixProvider,
+            "opik": OpikProvider,
+            "braintrust": BraintrustProvider,
+        }
 
-                try:
-                    if provider.initialize():
-                        self.active_providers[provider_name] = provider
-                        print(f"[Observability] Initialized: {provider_name}")
-                    else:
-                        print(f"[Observability] Failed to initialize: {provider_name}")
-                except Exception as e:
-                    print(f"[Observability] Error initializing {provider_name}: {e}")
+        print(f"[Observability] Initializing providers: {self.provider_names}")
+
+        for name in self.provider_names:
+            if name not in provider_classes:
+                print(f"[Observability] Unknown provider: {name}")
+                self.init_errors[name] = "Unknown provider type"
+                continue
+
+            try:
+                # Instantiate and initialize
+                provider_cls = provider_classes[name]
+                # Instantiate and initialize
+                provider = provider_cls()
+                
+                if provider.initialize():
+                    self.active_providers[name] = provider
+                    print(f"[Observability] Initialized: {name}")
+                else:
+                    # Try to capture failure reason if provider stored it (we might need to add this to BaseProvider)
+                    # For now, we assume it failed silently or printed to stdout
+                    # Let's check if provider has 'last_error' or similar, or just generic msg
+                    self.init_errors[name] = getattr(provider, "init_error", "Initialization failed (check logs/env)")
+                    print(f"[Observability] Failed to initialize: {name}")
+            except Exception as e:
+                print(f"[Observability] Error initializing {name}: {e}")
+                self.init_errors[name] = str(e)
+        
+        # Give providers time to finish sending data
+        import time
+        time.sleep(0.5)
+        print("[Observability] All providers shutdown complete")
 
     def shutdown(self) -> None:
         """Shutdown all providers."""
+        print("[Observability] Shutting down all providers...")
         for name, provider in self.active_providers.items():
             try:
                 provider.shutdown()
-                print(f"[Observability] Shutdown: {name}")
             except Exception as e:
                 print(f"[Observability] Error shutting down {name}: {e}")
+        
+        # Give providers time to finish sending data
+        import time
+        time.sleep(0.5)
+        print("[Observability] All providers shutdown complete")
 
     @contextmanager
     def trace(self, name: str, **kwargs) -> Generator[MultiProviderSpan, None, None]:

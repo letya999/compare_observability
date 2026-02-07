@@ -31,11 +31,11 @@ class OpikProvider(ObservabilityProvider):
     supports_async = False
 
     def __init__(self):
-        self.client = None
-        self.project_name = os.getenv("OPIK_PROJECT_NAME", "compare-observability")
+        self.configured = False
+        self.project_name = os.getenv("OPIK_PROJECT_NAME", "compare_observability")
 
     def initialize(self) -> bool:
-        """Initialize Opik client."""
+        """Initialize Opik using global configuration."""
         api_key = os.getenv("OPIK_API_KEY")
         if not api_key:
             print("[Opik] No API key found (OPIK_API_KEY)")
@@ -44,8 +44,8 @@ class OpikProvider(ObservabilityProvider):
         try:
             import opik
             
-            # Configure Opik with all available settings
-            workspace = os.getenv("OPIK_WORKSPACE", "default")
+            # Configure Opik globally (new 2026 API)
+            workspace = os.getenv("OPIK_WORKSPACE", "artem-letyushev")
             url_override = os.getenv("OPIK_URL_OVERRIDE")
             
             config_kwargs = {
@@ -58,7 +58,7 @@ class OpikProvider(ObservabilityProvider):
                 config_kwargs["url"] = url_override
             
             opik.configure(**config_kwargs)
-            self.client = opik.Opik(project_name=self.project_name)
+            self.configured = True
             print(f"[Opik] Initialized successfully (workspace: {workspace}, project: {self.project_name})")
             return True
         except ImportError:
@@ -70,38 +70,45 @@ class OpikProvider(ObservabilityProvider):
 
     def shutdown(self) -> None:
         """Flush pending data."""
-        if self.client:
-            self.client.flush()
+        if self.configured:
+            try:
+                import opik
+                opik.flush_tracker()
+                print("[Opik] Flushed all pending traces")
+            except Exception as e:
+                print(f"[Opik] Error flushing: {e}")
 
     @contextmanager
     def trace(self, name: str, **kwargs) -> Generator[SpanContext, None, None]:
-        """Start a new trace."""
-        trace_id = str(uuid.uuid4())
-
-        opik_trace = self.client.trace(
+        """Start a new trace using context manager."""
+        import opik
+        
+        # Use the new 2026 API with context manager
+        with opik.start_as_current_trace(
             name=name,
             input=kwargs.get("inputs"),
             metadata=kwargs.get("metadata"),
-        )
-
-        span = SpanContext(
-            name=name,
-            span_type=SpanType.TRACE,
-            trace_id=opik_trace.id,
-            span_id=opik_trace.id,
-            start_time=datetime.now(),
-            metadata={"opik_trace": opik_trace},
-        )
-
-        try:
-            yield span
-            opik_trace.end(output=span.outputs)
-        except Exception as e:
-            opik_trace.end(
-                output={"error": str(e)},
-                error_info={"message": str(e)},
+            project_name=self.project_name,
+        ) as trace:
+            span = SpanContext(
+                name=name,
+                span_type=SpanType.TRACE,
+                trace_id=trace.id,
+                span_id=trace.id,
+                start_time=datetime.now(),
+                metadata={"opik_trace": trace},
             )
-            raise
+
+            try:
+                yield span
+                if span.outputs:
+                    trace.update(output=span.outputs)
+            except Exception as e:
+                trace.update(
+                    output={"error": str(e)},
+                    error_info={"message": str(e)},
+                )
+                raise
 
     @contextmanager
     def span(
@@ -111,12 +118,10 @@ class OpikProvider(ObservabilityProvider):
         parent: SpanContext | None = None,
         **kwargs,
     ) -> Generator[SpanContext, None, None]:
-        """Create a span within a trace."""
-        opik_trace = parent.metadata.get("opik_trace") if parent else None
-        opik_parent = parent.metadata.get("opik_span") if parent else None
-
+        """Create a span within a trace using context manager."""
+        import opik
+        
         # Map span type to Opik types: general, tool, llm, guardrail
-        # Note: Opik doesn't have 'retriever' type, use 'general' instead
         type_map = {
             SpanType.LLM: "llm",
             SpanType.RETRIEVER: "general",  # Opik doesn't support 'retriever'
@@ -125,45 +130,35 @@ class OpikProvider(ObservabilityProvider):
             SpanType.EMBEDDING: "general",
         }
 
-        if opik_trace:
-            opik_span = opik_trace.span(
-                name=name,
-                type=type_map.get(span_type, "general"),
-                input=kwargs.get("inputs"),
-                metadata=kwargs.get("metadata"),
-                parent_span_id=opik_parent.id if opik_parent else None,
-            )
-        else:
-            # Standalone span
-            opik_span = self.client.span(
-                name=name,
-                type=type_map.get(span_type, "general"),
-                input=kwargs.get("inputs"),
-            )
-
-        span = SpanContext(
+        # Use the new 2026 API with context manager
+        with opik.start_as_current_span(
             name=name,
-            span_type=span_type,
-            trace_id=parent.trace_id if parent else opik_span.id,
-            span_id=opik_span.id,
-            parent_span_id=parent.span_id if parent else None,
-            start_time=datetime.now(),
-            metadata={
-                "opik_span": opik_span,
-                "opik_trace": opik_trace,
-            },
-        )
-
-        try:
-            yield span
-            opik_span.end(output=span.outputs)
-        except Exception as e:
-            span.error = str(e)
-            opik_span.end(
-                output={"error": str(e)},
-                error_info={"message": str(e)},
+            type=type_map.get(span_type, "general"),
+            input=kwargs.get("inputs"),
+            metadata=kwargs.get("metadata"),
+            project_name=self.project_name,
+        ) as opik_span:
+            span = SpanContext(
+                name=name,
+                span_type=span_type,
+                trace_id=parent.trace_id if parent else opik_span.id,
+                span_id=opik_span.id,
+                parent_span_id=parent.span_id if parent else None,
+                start_time=datetime.now(),
+                metadata={"opik_span": opik_span},
             )
-            raise
+
+            try:
+                yield span
+                if span.outputs:
+                    opik_span.update(output=span.outputs)
+            except Exception as e:
+                span.error = str(e)
+                opik_span.update(
+                    output={"error": str(e)},
+                    error_info={"message": str(e)},
+                )
+                raise
 
     def log_llm_call(
         self,

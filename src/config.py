@@ -40,6 +40,9 @@ class Config:
 
     # Observability
     observability_providers: list[ObservabilityProvider] = field(default_factory=list)
+    observability_project_name: str = field(
+        default_factory=lambda: os.getenv("OBSERVABILITY_PROJECT_NAME", "compare-observability")
+    )
 
     def __post_init__(self):
         """Parse observability providers from environment."""

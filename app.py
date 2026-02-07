@@ -4,7 +4,21 @@ import json
 import time
 from pathlib import Path
 
+import os
+from pathlib import Path
 import streamlit as st
+from dotenv import load_dotenv
+
+# Force reload env vars from explicit path
+env_path = Path(__file__).parent / ".env"
+st.write(f"Loading config from: {env_path}") # Debug output
+load_dotenv(dotenv_path=env_path, override=True)
+
+# Debug: Print loaded keys status (masked)
+keys_to_check = ["LANGCHAIN_API_KEY", "OPIK_API_KEY", "ARIZE_API_KEY", "BRAINTRUST_API_KEY"]
+status_msg = "Env check: " + ", ".join([f"{k}={'OK' if os.getenv(k) else 'MISSING'}" for k in keys_to_check])
+print(status_msg)
+# st.caption(status_msg) # Show in UI for debugging
 
 from src.config import config
 from src.logger import logger
@@ -21,10 +35,11 @@ st.set_page_config(
 )
 
 
-@st.cache_resource
-def get_orchestrator():
-    """Initialize the traced orchestrator."""
-    return TracedRAGOrchestrator()
+@st.cache_resource(show_spinner="Initializing Orchestrator...")
+def get_orchestrator(selected_providers: list[str] | None = None):
+    """Initialize the traced orchestrator with selected providers."""
+    # If None, will use default from config
+    return TracedRAGOrchestrator(observability_providers=selected_providers)
 
 
 def main():
@@ -45,14 +60,34 @@ def main():
             help="Select which observability platforms to send traces to",
         )
 
+        if st.button("🔄 Reload & Reset", help="Clear cache and reload configuration"):
+            st.cache_resource.clear()
+            st.rerun()
+
         # Display provider status
         if selected_providers:
             st.write("**Status:**")
-            orchestrator = get_orchestrator()
+            # Pass selected providers to init
+            orchestrator = get_orchestrator(selected_providers)
+            # Store in session state for other pages
+            st.session_state.orchestrator = orchestrator
+            
+            active_count = 0
             for provider in selected_providers:
                 is_active = provider in orchestrator.obs_manager.active_providers
-                status = "" if is_active else ""
+                status = "✅" if is_active else "❌"
+                if is_active: active_count += 1
                 st.write(f"{status} {provider}")
+                
+                # Show error detail if failed
+                if not is_active:
+                    # Use getattr to be safe against cached old instances without init_errors
+                    init_errors = getattr(orchestrator.obs_manager, 'init_errors', {}) 
+                    error_msg = init_errors.get(provider, "Initialization failed. Check logs.")
+                    st.caption(f":red[{error_msg}]")
+                
+            if active_count == 0 and selected_providers:
+                st.error("No providers active! Check API keys in .env")
 
         st.divider()
 
@@ -82,7 +117,52 @@ def query_page():
     """Main query interface."""
     st.header("Ask Questions")
 
-    orchestrator = get_orchestrator()
+    # Get orchestrator with currently selected providers from config (or default)
+    # Note: In a real app we might want to pass state, but streamlit reruns script top-down
+    # so we need to get the selection from session state or re-read sidebar widget if possible.
+    # But sidebar widgets are available here.
+    
+    # We need to match what was selected in sidebar. 
+    # Since we can't easily access sidebar widget value here without session state,
+    # we'll rely on the cached resource being the right one if user didn't change it,
+    # OR we should really move get_orchestrator call to main and pass it down.
+    # Refactoring slightly:
+    
+    # Actually, simpler: we assume the user configured in sidebar. 
+    # To be safe, let's grab the default from config if we can't see the widget,
+    # but the widget IS in the same script run.
+    # Let's use config.observability_providers as fallback if needed, 
+    # but better to use the specific sidebar key if we assigned one, or just trust the cache 
+    # (which updates when args change).
+    
+    # Let's get the orchestrator again with current config
+    # We can reconstruct valid providers list from config or defaults
+    current_providers = config.observability_providers # Fallback
+    
+    # Try to find the multiselect value in session state if available, key isn't set above so it's auto-generated.
+    # Instead, let's just use get_orchestrator wrapped in a way that uses the latest args.
+    # BUT, we can't easily pass args here without passing them to query_page.
+    # Let's just instantiate with config.observability_providers for now in this scope 
+    # assuming sidebar updated the config or we just use what's cached.
+    
+    # BETTER FIX: pass orchestrator to pages. But that requires bigger refactor.
+    # Hack: sidebar is run before this. st.session_state should have the value if we key it.
+    
+    # Let's key the multiselect in main() to access it here.
+    pass # We will fix the multiselect key in main chunk above next.
+    
+    orchestrator = get_orchestrator(None) # Expecting this might need fix.
+    
+    # Wait, st.cache_resource is smart. If we call get_orchestrator(selected_list) in sidebar,
+    # and then get_orchestrator(same_list) here, it works. 
+    # But here we don't have 'selected_list'.
+    
+    # Solution: We will inject orchestrator into st.session_state in main()
+    if "orchestrator" in st.session_state:
+        orchestrator = st.session_state.orchestrator
+    else:
+        orchestrator = get_orchestrator(None) # Fallback
+
     stats = orchestrator.get_stats()
 
     # Show stats
@@ -202,7 +282,10 @@ def pdf_management_page():
     """PDF upload and management."""
     st.header("PDF Management")
 
-    orchestrator = get_orchestrator()
+    if "orchestrator" in st.session_state:
+        orchestrator = st.session_state.orchestrator
+    else:
+        orchestrator = get_orchestrator(None)
 
     # Upload
     uploaded_files = st.file_uploader(
@@ -234,10 +317,29 @@ def pdf_management_page():
     st.metric("Total Chunks in Index", stats["vector_store"]["total_chunks"])
 
     # Clear data
-    if st.button("Clear All Data", type="secondary"):
-        orchestrator.clear_data()
-        st.success("Data cleared")
-        st.rerun()
+    # Data Management
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("Clear All Data", type="secondary", help="Delete all chunks from the index"):
+            orchestrator.clear_data()
+            st.success("Data cleared")
+            st.rerun()
+
+    with col2:
+        if st.button("Re-index All PDFs", type="primary", help="Clear index and re-ingest all PDFs from data/pdfs"):
+            orchestrator.clear_data()
+            pdfs = list(config.pdf_dir.glob("*.pdf"))
+            if not pdfs:
+                st.warning("No PDFs found in data directory.")
+            else:
+                progress_bar = st.progress(0)
+                for i, pdf_path in enumerate(pdfs):
+                    with st.spinner(f"Ingesting {pdf_path.name}..."):
+                        orchestrator.ingest_pdf(pdf_path)
+                    progress_bar.progress((i + 1) / len(pdfs))
+                st.success(f"Re-indexed {len(pdfs)} documents.")
+                time.sleep(1) # Give time to read message
+                st.rerun()
 
 
 def scenarios_page():

@@ -275,3 +275,17 @@ class Retriever:
         # 3. Reciprocal Rank Fusion
         return self.rrf_merge(vector_results, bm25_results, k=k, rrf_k=rrf_k)
 
+    def clear(self) -> None:
+        """Clear all chunks from the vector store."""
+        try:
+            self.chroma_client.delete_collection("pdf_chunks")
+        except Exception:
+            pass
+        
+        self.collection = self.chroma_client.get_or_create_collection(
+            name="pdf_chunks",
+            metadata={"hnsw:space": "cosine"},
+        )
+        self.bm25 = None
+        self.chunk_ids = []
+

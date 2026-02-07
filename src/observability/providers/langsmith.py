@@ -67,8 +67,12 @@ class LangSmithProvider(ObservabilityProvider):
 
     def shutdown(self) -> None:
         """Flush pending data."""
-        # LangSmith handles this automatically
-        pass
+        if self.client:
+            try:
+                self.client.flush()
+                print("[LangSmith] Flushed all pending runs")
+            except Exception as e:
+                print(f"[LangSmith] Error flushing: {e}")
 
     @contextmanager
     def trace(self, name: str, **kwargs) -> Generator[SpanContext, None, None]:

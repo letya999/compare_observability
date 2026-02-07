@@ -61,11 +61,13 @@ class ArizePhoenixProvider(ObservabilityProvider):
 
     def shutdown(self) -> None:
         """Flush spans."""
-        try:
-            if self.tracer_provider and hasattr(self.tracer_provider, 'force_flush'):
-                self.tracer_provider.force_flush()
-        except Exception:
-            pass
+        if self.tracer_provider and hasattr(self.tracer_provider, 'force_flush'):
+            try:
+                # Force flush with timeout (in milliseconds)
+                self.tracer_provider.force_flush(timeout_millis=5000)
+                print("[Arize] Flushed all pending spans")
+            except Exception as e:
+                print(f"[Arize] Error flushing: {e}")
 
     @contextmanager
     def trace(self, name: str, **kwargs) -> Generator[SpanContext, None, None]:
@@ -73,6 +75,12 @@ class ArizePhoenixProvider(ObservabilityProvider):
         with self.tracer.start_as_current_span(name) as otel_span:
             # Set OpenInference attributes
             otel_span.set_attribute("openinference.span.kind", "CHAIN")
+
+            # Set User and Session IDs if provided
+            if kwargs.get("user_id"):
+                otel_span.set_attribute("user.id", kwargs["user_id"])
+            if kwargs.get("session_id"):
+                otel_span.set_attribute("session.id", kwargs["session_id"])
 
             if kwargs.get("inputs"):
                 otel_span.set_attribute("input.value", str(kwargs["inputs"]))

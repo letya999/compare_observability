@@ -42,7 +42,7 @@ class Generator:
         chunks: list[RetrievedChunk],
         reasoning_steps: list[dict[str, Any]] | None = None,
         stream: bool = False,
-    ) -> GeneratedResponse | GenType[str, None, GeneratedResponse]:
+    ) -> GeneratedResponse | GenType[str | GeneratedResponse, None, None]:
         """
         Generate a response based on query and retrieved context.
 
@@ -53,7 +53,7 @@ class Generator:
             stream: Whether to stream the response
 
         Returns:
-            GeneratedResponse or generator yielding chunks then final response
+            GeneratedResponse or generator yielding chunks (str) then final response (GeneratedResponse)
         """
         # Format context
         context = self._format_context(chunks)
@@ -116,7 +116,7 @@ class Generator:
 
     def _generate_streaming(
         self, messages: list[dict], chunks: list[RetrievedChunk]
-    ) -> GenType[str, None, GeneratedResponse]:
+    ) -> GenType[str | GeneratedResponse, None, None]:
         """Generate response with streaming."""
         start_time = time.time()
         full_response = ""
@@ -141,7 +141,8 @@ class Generator:
         latency_ms = (time.time() - start_time) * 1000
 
         # Return final response object
-        return GeneratedResponse(
+        # Yield final response object so it can be captured by the loop
+        yield GeneratedResponse(
             answer=full_response,
             citations=self._extract_citations(chunks),
             concepts=[],
