@@ -115,6 +115,7 @@ class TracedRAGOrchestrator:
                     response=type("Response", (), {
                         "choices": [type("Choice", (), {"message": type("Msg", (), {"content": str(query_analysis)})()})()],
                         "usage": type("Usage", (), {"prompt_tokens": 50, "completion_tokens": 100, "total_tokens": 150})(),
+                        "model": config.llm_model
                     })(),
                 )
 
@@ -249,6 +250,7 @@ class TracedRAGOrchestrator:
                                 "completion_tokens": response.token_usage.get("completion_tokens", 0),
                                 "total_tokens": response.token_usage.get("total_tokens", 0),
                             })(),
+                            "model": config.llm_model,
                         })(),
                     )
 
@@ -375,6 +377,7 @@ class TracedRAGOrchestrator:
                     "completion_tokens": response.token_usage.get("completion_tokens", 0),
                     "total_tokens": response.token_usage.get("total_tokens", 0),
                 })(),
+                "model": config.llm_model,
             })(),
         )
 

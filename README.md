@@ -8,7 +8,36 @@ This project implements a PDF Knowledge Explorer that allows you to:
 1. Upload and index PDF documents
 2. Ask natural language questions about the content
 3. Get AI-generated answers with citations
-4. **Compare how 9 different observability platforms capture and display traces**
+4. **Compare how 9+ different observability platforms capture and display traces**
+
+## 🚀 New Features (February 2026)
+
+### Performance Benchmarking
+- **Measure actual SDK overhead** for each observability provider
+- Compare latency impact with statistical analysis (avg, median, P95, P99)
+- Identify the fastest providers for your use case
+- Export results for decision-making
+
+### Automatic Capability Detection
+- **Auto-test each provider** for supported features
+- Automatically fill comparison matrix based on actual behavior
+- Save hours of manual testing
+- Get confidence scores for each detection
+
+### Sample Data Loader
+- **Start testing immediately** with pre-generated sample PDF
+- Includes comprehensive content about LLM observability
+- 8 sample queries covering different scenarios
+- No need to find and upload your own documents
+
+### Enhanced Comparison Matrix
+- New criteria categories: Debugging & RCA, Security, Optimization, Agentic Logic
+- Auto-fill from capability detection
+- Export to JSON/Markdown
+- Visual rankings and charts
+
+See [IMPROVEMENTS.md](docs/IMPROVEMENTS.md) for detailed documentation.
+
 
 ## Observability Platforms Tested
 

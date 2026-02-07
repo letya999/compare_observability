@@ -26,7 +26,18 @@ from src.config import config
 from src.logger import logger
 from src.pipeline.traced_orchestrator import TracedRAGOrchestrator
 from src.evaluations.comparison_matrix import ComparisonMatrix, PLATFORMS, CRITERIA, CriteriaCategory
+from src.evaluations.benchmark import PerformanceBenchmarker
+from src.evaluations.capability_detector import CapabilityDetector
 from scenarios import SCENARIOS, ScenarioRunner, DiscoveryGenerator
+
+# Import sample data utilities
+try:
+    from src.utils.sample_data import initialize_sample_data, has_sample_data, get_sample_queries
+except ImportError:
+    logger.warning("Sample data module not available")
+    has_sample_data = lambda: False
+    initialize_sample_data = lambda force=False: (None, [])
+    get_sample_queries = lambda: []
 
 
 # Page config
@@ -102,7 +113,16 @@ def main():
         # Navigation
         page = st.radio(
             "Navigation",
-            ["Quick Start", "Query Interface", "PDF Management", "Test Scenarios", "Comparison Matrix", "Results"],
+            [
+                "Quick Start", 
+                "Query Interface", 
+                "PDF Management", 
+                "Test Scenarios", 
+                "Comparison Matrix",
+                "🚀 Benchmarking",
+                "🔍 Auto-Detection",
+                "Results"
+            ],
             index=0,
         )
 
@@ -117,6 +137,10 @@ def main():
         scenarios_page()
     elif page == "Comparison Matrix":
         matrix_page()
+    elif page == "🚀 Benchmarking":
+        benchmarking_page()
+    elif page == "🔍 Auto-Detection":
+        auto_detection_page()
     else:
         results_page()
 
@@ -752,6 +776,260 @@ def quick_start_page():
             pass
     with col2:
         st.caption("Check the sidebar to navigate to other pages.")
+        
+    # Sample data initialization
+    st.divider()
+    st.subheader("📦 Quick Setup")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        if has_sample_data():
+            st.success("✓ Sample data loaded")
+            if st.button("View Sample Queries"):
+                queries = get_sample_queries()
+                st.write("**Sample queries you can try:**")
+                for i, q in enumerate(queries[:5], 1):
+                    st.write(f"{i}. {q}")
+        else:
+            st.info("No sample data found")
+            if st.button("Load Sample Data", type="primary"):
+                with st.spinner("Generating sample PDF..."):
+                    pdf_path, queries = initialize_sample_data(force=True)
+                    st.success(f"Sample data loaded: {pdf_path.name}")
+                    st.rerun()
+                    
+    with col2:
+        st.info("**Next Steps:**\n1. Load sample data or upload your own PDFs\n2. Go to 'PDF Management' to index documents\n3. Try queries in 'Query Interface'\n4. Run benchmarks and auto-detection")
+
+
+def benchmarking_page():
+    """Performance benchmarking page."""
+    st.header("🚀 Performance Benchmarking")
+    
+    st.markdown("""
+    Measure the actual performance overhead introduced by each observability SDK.
+    This helps you understand the latency impact of instrumentation.
+    """)
+    
+    if "orchestrator" in st.session_state:
+        orchestrator = st.session_state.orchestrator
+    else:
+        orchestrator = get_orchestrator(None)
+        
+    active_providers = list(orchestrator.obs_manager.active_providers)
+    
+    if not active_providers:
+        st.warning("No active providers. Please configure providers in the sidebar.")
+        return
+        
+    st.subheader("Configuration")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        num_iterations = st.slider("Number of iterations per provider", 3, 20, 5)
+    with col2:
+        test_query = st.text_input("Test query", value="What is observability?")
+        
+    selected_providers = st.multiselect(
+        "Providers to benchmark",
+        active_providers,
+        default=active_providers
+    )
+    
+    if st.button("🚀 Run Benchmark", type="primary", disabled=not selected_providers):
+        benchmarker = PerformanceBenchmarker(num_iterations=num_iterations)
+        
+        progress = st.progress(0)
+        status = st.empty()
+        
+        # Run baseline
+        status.text("Running baseline (no observability)...")
+        baseline = benchmarker.benchmark_baseline(test_query)
+        st.info(f"Baseline latency: {baseline:.2f}ms")
+        
+        # Run benchmarks
+        for i, provider in enumerate(selected_providers):
+            status.text(f"Benchmarking {provider}...")
+            benchmarker.benchmark_provider(provider, test_query, baseline)
+            progress.progress((i + 1) / len(selected_providers))
+            
+        status.text("Benchmark complete!")
+        
+        # Display results
+        st.divider()
+        st.subheader("Results")
+        
+        # Create comparison chart
+        providers = []
+        avg_latencies = []
+        overheads = []
+        
+        for provider, result in benchmarker.results.items():
+            providers.append(provider)
+            avg_latencies.append(result.avg_latency_ms)
+            overheads.append(result.overhead_percent)
+            
+        # Latency chart
+        fig1 = go.Figure()
+        fig1.add_trace(go.Bar(
+            x=providers,
+            y=avg_latencies,
+            name='Average Latency (ms)',
+            marker_color='#F63366'
+        ))
+        fig1.add_hline(y=baseline, line_dash="dash", line_color="green", 
+                      annotation_text="Baseline")
+        fig1.update_layout(
+            title="Average Latency by Provider",
+            yaxis_title="Latency (ms)",
+            template="plotly_dark",
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+        )
+        st.plotly_chart(fig1, use_container_width=True)
+        
+        # Overhead chart
+        fig2 = go.Figure()
+        fig2.add_trace(go.Bar(
+            x=providers,
+            y=overheads,
+            name='Overhead %',
+            marker_color='#FF6B6B'
+        ))
+        fig2.update_layout(
+            title="SDK Overhead by Provider",
+            yaxis_title="Overhead (%)",
+            template="plotly_dark",
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+        )
+        st.plotly_chart(fig2, use_container_width=True)
+        
+        # Detailed table
+        st.subheader("Detailed Metrics")
+        data = []
+        for provider, result in sorted(benchmarker.results.items(), key=lambda x: x[1].avg_latency_ms):
+            data.append({
+                "Provider": provider,
+                "Avg (ms)": f"{result.avg_latency_ms:.2f}",
+                "Median (ms)": f"{result.median_latency_ms:.2f}",
+                "P95 (ms)": f"{result.p95_latency_ms:.2f}",
+                "P99 (ms)": f"{result.p99_latency_ms:.2f}",
+                "Overhead": f"{result.overhead_percent:.1f}%",
+                "Error Rate": f"{result.error_rate*100:.1f}%"
+            })
+        st.dataframe(data, use_container_width=True, hide_index=True)
+        
+        # Export
+        if st.button("💾 Export Results"):
+            output_path = Path("results/benchmark_results.json")
+            benchmarker.export_results(output_path)
+            st.success(f"Results exported to {output_path}")
+
+
+def auto_detection_page():
+    """Automatic capability detection page."""
+    st.header("🔍 Automatic Capability Detection")
+    
+    st.markdown("""
+    Automatically test each provider to detect supported features.
+    This saves time by auto-filling the comparison matrix based on actual behavior.
+    """)
+    
+    if "orchestrator" in st.session_state:
+        orchestrator = st.session_state.orchestrator
+    else:
+        orchestrator = get_orchestrator(None)
+        
+    active_providers = list(orchestrator.obs_manager.active_providers)
+    
+    if not active_providers:
+        st.warning("No active providers. Please configure providers in the sidebar.")
+        return
+        
+    st.subheader("Configuration")
+    
+    selected_providers = st.multiselect(
+        "Providers to test",
+        active_providers,
+        default=active_providers[:3] if len(active_providers) > 3 else active_providers
+    )
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        auto_fill = st.checkbox("Auto-fill comparison matrix", value=True)
+    with col2:
+        confidence_threshold = st.slider("Confidence threshold", 0.5, 1.0, 0.7, 0.1)
+        
+    if st.button("🔍 Detect Capabilities", type="primary", disabled=not selected_providers):
+        detector = CapabilityDetector()
+        
+        progress = st.progress(0)
+        status = st.empty()
+        
+        # Run detection
+        for i, provider in enumerate(selected_providers):
+            status.text(f"Testing {provider}...")
+            detector.detect_all_capabilities(provider)
+            progress.progress((i + 1) / len(selected_providers))
+            
+        status.text("Detection complete!")
+        
+        # Display results
+        st.divider()
+        st.subheader("Detection Results")
+        
+        for provider, results in detector.test_results.items():
+            with st.expander(f"**{provider.upper()}**", expanded=True):
+                for result in results:
+                    col1, col2, col3 = st.columns([2, 1, 3])
+                    with col1:
+                        status_icon = "✅" if result.supported else "❌"
+                        st.write(f"{status_icon} **{result.criterion}**")
+                    with col2:
+                        confidence_color = "green" if result.confidence >= 0.8 else "orange" if result.confidence >= 0.6 else "red"
+                        st.markdown(f":{confidence_color}[{result.confidence:.0%}]")
+                    with col3:
+                        st.caption(result.evidence)
+                        
+        # Auto-fill matrix
+        if auto_fill:
+            st.divider()
+            st.subheader("Auto-Fill Comparison Matrix")
+            
+            matrix_path = Path("results/comparison_matrix.json")
+            if matrix_path.exists():
+                matrix = ComparisonMatrix()
+                matrix.import_json(matrix_path)
+            else:
+                matrix = ComparisonMatrix()
+                
+            # Update matrix
+            updated_count = 0
+            for provider, results in detector.test_results.items():
+                for result in results:
+                    if result.confidence >= confidence_threshold:
+                        matrix.set_score(
+                            provider,
+                            result.criterion,
+                            result.supported,
+                            notes=f"Auto-detected (confidence: {result.confidence:.0%}). {result.evidence}"
+                        )
+                        updated_count += 1
+                        
+            st.success(f"Updated {updated_count} matrix entries")
+            
+            if st.button("💾 Save Matrix"):
+                matrix_path.parent.mkdir(parents=True, exist_ok=True)
+                matrix.export_json(matrix_path)
+                st.success(f"Matrix saved to {matrix_path}")
+                
+        # Export detection results
+        if st.button("💾 Export Detection Results"):
+            output_path = Path("results/capability_detection.json")
+            detector.export_results(output_path)
+            st.success(f"Results exported to {output_path}")
+
 
 
 if __name__ == "__main__":
