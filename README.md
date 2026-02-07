@@ -272,10 +272,23 @@ pdf-knowledge-rag/
  screenshots/             # UI screenshots for comparison
 ```
 
-## Deliverables
+## 🤝 Contributing
 
--  GitHub repo with all integrations
--  Filled comparison matrix (JSON + Markdown)
--  Screenshots folder with UI comparisons
--  Competitive analysis report
--  Curestry roadmap recommendations
+Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
+
+## 📜 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🛡️ Security
+
+See [SECURITY.md](SECURITY.md) for reporting vulnerabilities.
+
+## 💬 Community
+
+- **Code of Conduct**: We follow the [Contributor Covenant](CODE_OF_CONDUCT.md).
+- **Issues**: Use the [issue tracker](https://github.com/letya999/compare_observability/issues) for bugs and features.
+- **Discussions**: (Optional) Join our community discussions.
+
+---
+*Developed for research and comparison of AI observability platforms.*

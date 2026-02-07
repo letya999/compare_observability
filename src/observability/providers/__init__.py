@@ -41,5 +41,6 @@ __all__ = [
     "LogfireProvider",
     "WeaveProvider",
     "HoneycombProvider",
+    "HeliconeProvider",
     "PROVIDER_CLASSES",
 ]

@@ -41,6 +41,7 @@ class Generator:
         query_analysis: QueryAnalysis,
         chunks: list[RetrievedChunk],
         reasoning_steps: list[dict[str, Any]] | None = None,
+        history: list[dict[str, str]] | None = None,
         stream: bool = False,
     ) -> GeneratedResponse | GenType[str | GeneratedResponse, None, None]:
         """
@@ -72,15 +73,22 @@ class Generator:
                 "role": "system",
                 "content": "You are a knowledgeable assistant. Answer questions accurately based on provided context.",
             },
-            {
-                "role": "user",
-                "content": GENERATION_PROMPT.format(
-                    context=context,
-                    reasoning_context=reasoning_context,
-                    query=query_analysis.original_query,
-                ),
-            },
         ]
+        
+        # Add history if provided
+        if history:
+            for msg in history:
+                messages.append({"role": msg["role"], "content": msg["content"]})
+        
+        # Add current query with context
+        messages.append({
+            "role": "user",
+            "content": GENERATION_PROMPT.format(
+                context=context,
+                reasoning_context=reasoning_context,
+                query=query_analysis.original_query,
+            ),
+        })
 
         if stream:
             return self._generate_streaming(messages, chunks)

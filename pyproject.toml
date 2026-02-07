@@ -3,6 +3,10 @@ name = "pdf-knowledge-rag"
 version = "0.1.0"
 description = "PDF Knowledge Explorer - RAG system for testing observability platforms"
 readme = "README.md"
+license = { text = "MIT" }
+authors = [
+    { name = "Your Name", email = "your.email@example.com" }
+]
 requires-python = ">=3.11"
 dependencies = [
     # Core

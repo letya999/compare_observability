@@ -64,7 +64,85 @@ def get_orchestrator(selected_providers: list[str] | None = None):
     return TracedRAGOrchestrator(observability_providers=selected_providers)
 
 
+def sync_state():
+    """Sync Streamlit session state with browser localStorage via custom component."""
+    # Define keys to persist across browser sessions
+    PERSISTENT_KEYS = {
+        "active_page": "Quick Start",
+        "selected_providers": config.observability_providers or [],
+        "messages": [], # Chat history
+        "benchmark_results": None,
+        "detection_results": None,
+        "scenario_results": None,
+    }
+
+    # Initialize session state with defaults
+    for key, default in PERSISTENT_KEYS.items():
+        if key not in st.session_state:
+            st.session_state[key] = default
+
+    # JS Bridge for LocalStorage
+    # This component handles bidirectional sync between Python and browser
+    from streamlit.components.v1 import html
+    
+    # Get current values to push to JS
+    providers_json = json.dumps(st.session_state.get("selected_providers", []))
+    page_json = json.dumps(st.session_state.get("active_page", "Quick Start"))
+    
+    # JS code that communicates with parents
+    js_code = f"""
+    <div id="bridge-root"></div>
+    <script>
+    // Helper to send data to Streamlit
+    function sendToStreamlit(data) {{
+        window.parent.postMessage({{
+            type: 'streamlit:setComponentValue',
+            value: data
+        }}, '*');
+    }}
+
+    // When component loads, try to read from localstore
+    const savedState = localStorage.getItem('rag_explorer_state');
+    if (savedState) {{
+        console.log('Found saved state in localStorage');
+        // We use a button or some mechanism to notify Python if needed, 
+        // but for now we'll just handle it via the component value
+        sendToStreamlit(JSON.parse(savedState));
+    }}
+
+    // Listen for updates from Python (passed via attributes or reload)
+    // We update localstore whenever Python sends new values
+    const currentState = {{
+        selected_providers: {providers_json},
+        active_page: {page_json}
+    }};
+    if (currentState.selected_providers.length > 0) {{
+        localStorage.setItem('rag_explorer_state', JSON.stringify(currentState));
+    }}
+    </script>
+    """
+    
+    # Render the bridge and capture its value
+    bridge_value = html(js_code, height=0)
+    
+    # Handle incoming state from LocalStorage
+    if bridge_value and isinstance(bridge_value, dict):
+        if "selected_providers" in bridge_value and not st.session_state.get("ls_synced"):
+            st.session_state.selected_providers = bridge_value["selected_providers"]
+            st.session_state.active_page = bridge_value.get("active_page", "Quick Start")
+            st.session_state.ls_synced = True
+            st.rerun()
+
 def main():
+    # Sync with LocalStorage
+    sync_state()
+    
+    # Initialize Persistent State (Fallback)
+    if "active_page" not in st.session_state:
+        st.session_state.active_page = "Quick Start"
+    if "selected_providers" not in st.session_state:
+        st.session_state.selected_providers = config.observability_providers or []
+
     # Sidebar
     with st.sidebar:
         st.header("Configuration")
@@ -72,242 +150,231 @@ def main():
         # Provider selection
         st.subheader("Observability Providers")
         available_providers = list(PLATFORMS.keys())
+        
+        # Use session state for multiselect default
         selected_providers = st.multiselect(
             "Active providers",
             available_providers,
-            default=config.observability_providers or [],
+            default=st.session_state.selected_providers,
+            key="providers_input",
             help="Select which observability platforms to send traces to",
         )
+        
+        # Update session state when changed
+        if selected_providers != st.session_state.selected_providers:
+            st.session_state.selected_providers = selected_providers
+            st.rerun()
 
         if st.button("🔄 Reload & Reset", help="Clear cache and reload configuration"):
             st.cache_resource.clear()
+            st.session_state.clear()
             st.rerun()
 
         # Display provider status
-        if selected_providers:
+        if st.session_state.selected_providers:
             st.write("**Status:**")
-            # Pass selected providers to init
-            orchestrator = get_orchestrator(selected_providers)
-            # Store in session state for other pages
+            orchestrator = get_orchestrator(st.session_state.selected_providers)
             st.session_state.orchestrator = orchestrator
             
             active_count = 0
-            for provider in selected_providers:
+            for provider in st.session_state.selected_providers:
                 is_active = provider in orchestrator.obs_manager.active_providers
                 status = "✅" if is_active else "❌"
                 if is_active: active_count += 1
                 st.write(f"{status} {provider}")
                 
-                # Show error detail if failed
                 if not is_active:
-                    # Use getattr to be safe against cached old instances without init_errors
                     init_errors = getattr(orchestrator.obs_manager, 'init_errors', {}) 
-                    error_msg = init_errors.get(provider, "Initialization failed. Check logs.")
+                    error_msg = init_errors.get(provider, "Initialization failed.")
                     st.caption(f":red[{error_msg}]")
                 
-            if active_count == 0 and selected_providers:
-                st.error("No providers active! Check API keys in .env")
+            if active_count == 0 and st.session_state.selected_providers:
+                st.error("No providers active!")
 
         st.divider()
 
         # Navigation
+        pages = [
+            "Quick Start", 
+            "Chat Interface", 
+            "PDF Management", 
+            "Test Scenarios", 
+            "Comparison Matrix",
+            "🚀 Benchmarking",
+            "🔍 Auto-Detection",
+            "Results"
+        ]
+        
+        # Find index of current page to keep it selected
+        try:
+            current_index = pages.index(st.session_state.active_page)
+        except ValueError:
+            current_index = 0
+
         page = st.radio(
             "Navigation",
-            [
-                "Quick Start", 
-                "Query Interface", 
-                "PDF Management", 
-                "Test Scenarios", 
-                "Comparison Matrix",
-                "🚀 Benchmarking",
-                "🔍 Auto-Detection",
-                "Results"
-            ],
-            index=0,
+            pages,
+            index=current_index,
+            key="nav_radio"
         )
+        
+        # Update persistent page state
+        if page != st.session_state.active_page:
+            st.session_state.active_page = page
+            # No rerun needed here as Streamlit handles radio state, 
+            # but we update the tracking variable.
 
-    # Main content
-    if page == "Quick Start":
+    # Main content dispatch
+    if st.session_state.active_page == "Quick Start":
         quick_start_page()
-    elif page == "Query Interface":
-        query_page()
-    elif page == "PDF Management":
+    elif st.session_state.active_page == "Chat Interface":
+        chat_page()
+    elif st.session_state.active_page == "PDF Management":
         pdf_management_page()
-    elif page == "Test Scenarios":
+    elif st.session_state.active_page == "Test Scenarios":
         scenarios_page()
-    elif page == "Comparison Matrix":
+    elif st.session_state.active_page == "Comparison Matrix":
         matrix_page()
-    elif page == "🚀 Benchmarking":
+    elif st.session_state.active_page == "🚀 Benchmarking":
         benchmarking_page()
-    elif page == "🔍 Auto-Detection":
+    elif st.session_state.active_page == "🔍 Auto-Detection":
         auto_detection_page()
     else:
         results_page()
 
 
-def query_page():
-    """Main query interface."""
-    st.header("Ask Questions")
+def chat_page():
+    """Modern Chat interface for PDF Knowledge Explorer."""
+    st.header("Chat with Knowledge Base")
 
-    # Get orchestrator with currently selected providers from config (or default)
-    # Note: In a real app we might want to pass state, but streamlit reruns script top-down
-    # so we need to get the selection from session state or re-read sidebar widget if possible.
-    # But sidebar widgets are available here.
-    
-    # We need to match what was selected in sidebar. 
-    # Since we can't easily access sidebar widget value here without session state,
-    # we'll rely on the cached resource being the right one if user didn't change it,
-    # OR we should really move get_orchestrator call to main and pass it down.
-    # Refactoring slightly:
-    
-    # Actually, simpler: we assume the user configured in sidebar. 
-    # To be safe, let's grab the default from config if we can't see the widget,
-    # but the widget IS in the same script run.
-    # Let's use config.observability_providers as fallback if needed, 
-    # but better to use the specific sidebar key if we assigned one, or just trust the cache 
-    # (which updates when args change).
-    
-    # Let's get the orchestrator again with current config
-    # We can reconstruct valid providers list from config or defaults
-    current_providers = config.observability_providers # Fallback
-    
-    # Try to find the multiselect value in session state if available, key isn't set above so it's auto-generated.
-    # Instead, let's just use get_orchestrator wrapped in a way that uses the latest args.
-    # BUT, we can't easily pass args here without passing them to query_page.
-    # Let's just instantiate with config.observability_providers for now in this scope 
-    # assuming sidebar updated the config or we just use what's cached.
-    
-    # BETTER FIX: pass orchestrator to pages. But that requires bigger refactor.
-    # Hack: sidebar is run before this. st.session_state should have the value if we key it.
-    
-    # Let's key the multiselect in main() to access it here.
-    pass # We will fix the multiselect key in main chunk above next.
-    
-    orchestrator = get_orchestrator(None) # Expecting this might need fix.
-    
-    # Wait, st.cache_resource is smart. If we call get_orchestrator(selected_list) in sidebar,
-    # and then get_orchestrator(same_list) here, it works. 
-    # But here we don't have 'selected_list'.
-    
-    # Solution: We will inject orchestrator into st.session_state in main()
+    # Initialize orchestrator
     if "orchestrator" in st.session_state:
         orchestrator = st.session_state.orchestrator
     else:
-        orchestrator = get_orchestrator(None) # Fallback
+        orchestrator = get_orchestrator(st.session_state.get("selected_providers", []))
+        st.session_state.orchestrator = orchestrator
 
+    # Initialize chat history (Persistent in session_state)
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
+
+    # Initialize active result for inspection (lasts as long as the page is open)
+    if "last_result" not in st.session_state:
+        st.session_state.last_result = None
+
+    # Stats Summary in a single row
     stats = orchestrator.get_stats()
-
-    # Show stats
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("Indexed Chunks", stats["vector_store"]["total_chunks"])
-    with col2:
-        st.metric("Active Providers", len(orchestrator.obs_manager.active_providers))
-    with col3:
-        st.metric("LLM Model", stats["config"]["llm_model"])
+    cols = st.columns(4)
+    cols[0].metric("Chunks", stats["vector_store"]["total_chunks"])
+    cols[1].metric("Providers", len(orchestrator.obs_manager.active_providers))
+    cols[2].metric("Model", stats["config"]["llm_model"])
+    if st.session_state.last_result:
+        cols[3].metric("Last Latency", f"{st.session_state.last_result.total_latency_ms:.0f}ms")
+    else:
+        cols[3].metric("Last Latency", "-")
 
     st.divider()
 
-    # Query input
-    query = st.text_area(
-        "Your question",
-        placeholder="What is the attention mechanism in transformers?",
-        height=100,
-    )
+    # Create two columns: Chat and Inspector
+    chat_col, inspect_col = st.columns([2, 1])
 
-    col1, col2 = st.columns([1, 4])
-    with col1:
-        stream = st.checkbox("Stream response", value=True)
-    with col2:
-        skip_graph = st.checkbox("Skip graph extraction", value=False)
-        retrieval_only = st.checkbox("Retrieval Only (Debug)", value=False, help="Skip generation to inspect retrieved chunks")
+    with chat_col:
+        # Display chat messages from history
+        for message in st.session_state.messages:
+            with st.chat_message(message["role"]):
+                st.markdown(message["content"])
+                if "trace_urls" in message and message["trace_urls"]:
+                    cols = st.columns(len(message["trace_urls"]))
+                    for i, (provider, url) in enumerate(message["trace_urls"].items()):
+                        with cols[i]:
+                            st.caption(f"[View in {provider}]({url})")
 
-    if st.button("Ask", type="primary", disabled=not query):
-        with st.spinner("Processing..."):
-            start_time = time.time()
+        # Chat input
+        if prompt := st.chat_input("What do you want to know?"):
+            # Add user message to history
+            st.session_state.messages.append({"role": "user", "content": prompt})
+            with st.chat_message("user"):
+                st.markdown(prompt)
 
-            if stream:
-                # Streaming response
-                response_container = st.empty()
+            # Generate response
+            with st.chat_message("assistant"):
+                response_placeholder = st.empty()
                 full_response = ""
-
+                
+                # We'll use streaming by default for chat feel
                 try:
-                    gen = orchestrator.query(
-                        query, 
-                        stream=True, 
-                        skip_graph_extraction=skip_graph,
-                        retrieval_only=retrieval_only
-                    )
+                    # Collect result outside of generator loop
+                    final_result = None
+                    
+                    # Logic to pass settings (would be nice to have them in a small settings popover or sidebar)
+                    # For now using defaults
+                    gen = orchestrator.query(prompt, history=st.session_state.messages[:-1], stream=True)
+                    
                     for chunk in gen:
                         if isinstance(chunk, str):
                             full_response += chunk
-                            response_container.markdown(full_response + "")
+                            response_placeholder.markdown(full_response + "▌")
                         else:
-                            result = chunk
-                    response_container.markdown(full_response)
+                            final_result = chunk
+                    
+                    response_placeholder.markdown(full_response)
+                    
+                    # Add assistant message to history
+                    msg_data = {
+                        "role": "assistant", 
+                        "content": full_response,
+                        "trace_urls": getattr(final_result, "trace_urls", {})
+                    }
+                    st.session_state.messages.append(msg_data)
+                    st.session_state.last_result = final_result
+                    
+                    # Rerun to show trace links properly in the history view (Streamlit limitation on nested updates)
+                    st.rerun()
+
                 except Exception as e:
-                    logger.error("Streaming query execution failed", exc_info=True)
+                    logger.error("Chat query failed", exc_info=True)
                     st.error(f"Error: {e}")
-                    return
-            else:
-                # Non-streaming
-                try:
-                    result = orchestrator.query(
-                        query, 
-                        stream=False, 
-                        skip_graph_extraction=skip_graph,
-                        retrieval_only=retrieval_only
-                    )
-                    st.markdown(result.response.answer)
-                except Exception as e:
-                    logger.error("Standard query execution failed", exc_info=True)
-                    st.error(f"Error: {e}")
-                    return
 
-            total_time = time.time() - start_time
-
-            # Show metrics
-            st.divider()
-            st.subheader("Trace Metrics")
-
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.metric("Total Latency", f"{result.total_latency_ms:.0f}ms")
-            with col2:
-                st.metric("Retrieved Chunks", len(result.retrieved_chunks))
-            with col3:
-                tokens = result.response.token_usage.get("total_tokens", 0)
-                st.metric("Total Tokens", tokens)
-            with col4:
-                st.metric("Concepts Found", len(result.concepts))
-
-            # Step latencies
-            st.subheader("Pipeline Steps")
+    with inspect_col:
+        st.subheader("Trace Inspector")
+        if st.session_state.last_result:
+            result = st.session_state.last_result
+            
+            with st.container(border=True):
+                st.write(f"**Query:** {result.query}")
+                st.write(f"**Tokens:** {result.response.token_usage.get('total_tokens', 0)}")
+                st.write(f"**Cost:** ${result.cost_estimate_usd:.5f}")
+            
+            # Step Latencies
+            st.write("#### Pipeline Latencies")
             for step, latency in result.step_latencies.items():
                 st.progress(min(latency / 5000, 1.0), text=f"{step}: {latency:.0f}ms")
 
-            # Retrieved chunks
+            # Trace Links
+            if result.trace_urls:
+                st.write("#### External Traces")
+                for provider, url in result.trace_urls.items():
+                    st.link_button(f"🔍 {provider}", url, use_container_width=True)
+
+            # Retrieval Details
             with st.expander("Retrieved Chunks", expanded=False):
                 for i, chunk in enumerate(result.reranked_chunks):
                     st.markdown(f"**[{i+1}]** Score: {chunk.score:.3f} | Page: {chunk.chunk.page_number}")
-                    st.text(chunk.chunk.text[:500] + "..." if len(chunk.chunk.text) > 500 else chunk.chunk.text)
+                    st.caption(chunk.chunk.text[:300] + "...")
                     st.divider()
-
+            
             # Concepts
             if result.concepts:
-                with st.expander("Extracted Concepts", expanded=False):
+                with st.expander("Knowledge Graph", expanded=False):
                     for concept in result.concepts:
-                        st.markdown(f"**{concept.source}** -> *{concept.relation_type}* -> **{concept.target}**")
-                        st.caption(f"Confidence: {concept.confidence:.2f}")
+                        st.markdown(f"**{concept.source}** → {concept.relation_type} → **{concept.target}**")
 
-            # Trace URLs
-            trace_urls = getattr(result, "trace_urls", {})
-            if trace_urls:
-                st.subheader("View Traces")
-                cols = st.columns(min(len(trace_urls), 4))
-                for i, (provider, url) in enumerate(trace_urls.items()):
-                    with cols[i % 4]:
-                        st.link_button(f"🔍 {provider}", url, use_container_width=True)
+            if st.button("Clear Chat History", use_container_width=True):
+                st.session_state.messages = []
+                st.session_state.last_result = None
+                st.rerun()
+        else:
+            st.info("Ask a question to see trace details here.")
 
 
 def pdf_management_page():
@@ -453,12 +520,20 @@ def scenarios_page():
 
             progress.progress((i + 1) / len(selected_names))
 
+        # Store in session state
+        st.session_state.scenario_results = {
+            "run_date": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "providers": st.session_state.selected_providers,
+            "scenarios": [r.__dict__ for r in runner.results] # Simplified
+        }
+
         # Export results
         output_path = runner.export_results()
         st.success(f"Results exported to: {output_path}")
 
         # Summary components
         runner.shutdown()
+        st.rerun() # Refresh to show in results if navigating
 
 
 def matrix_page():
@@ -626,62 +701,68 @@ def matrix_page():
 
 
 def results_page():
-    """View and analyze results."""
-    st.header("Results & Analysis")
+    """View and analyze results from all modules."""
+    st.header("Results & Reports")
 
-    results_dir = Path("results")
-    if not results_dir.exists():
-        st.warning("No results directory found. Run some scenarios first.")
-        return
+    tabs = st.tabs(["Scenario Reports", "Performance Benchmarks", "Feature Detection"])
 
-    # Find result files
-    result_files = list(results_dir.glob("scenario_results_*.json"))
-    if not result_files:
-        st.warning("No scenario results found. Run some scenarios first.")
-        return
+    with tabs[0]:
+        st.subheader("Scenario Execution History")
+        results_dir = Path("results")
+        if not results_dir.exists():
+            st.info("No results directory found.")
+        else:
+            result_files = list(results_dir.glob("scenario_results_*.json"))
+            if not result_files:
+                st.write("No saved results found. Run some scenarios.")
+            else:
+                selected_file = st.selectbox("Select result file", result_files, format_func=lambda x: x.name)
+                if selected_file:
+                    with open(selected_file) as f:
+                        data = json.load(f)
+                    st.write(f"**Run date:** {data['run_date']}")
+                    st.write(f"**Providers:** {', '.join(data['providers'])}")
+                    st.divider()
+                    for scenario in data["scenarios"]:
+                        with st.expander(f"{scenario['name']} - {scenario['description']}"):
+                            st.write(f"**Success:** {'✅' if scenario['success'] else '❌'}")
+                            for check, passed in scenario["check_results"].items():
+                                st.write(f"{'✅' if passed else '❌'} {check}")
 
-    # Select result file
-    selected_file = st.selectbox(
-        "Select result file",
-        result_files,
-        format_func=lambda x: x.name,
-    )
+    with tabs[1]:
+        st.subheader("Last Benchmark Run")
+        if "benchmark_results" in st.session_state and st.session_state.benchmark_results:
+            results = st.session_state.benchmark_results
+            baseline = results.get("baseline", 0)
+            data = results.get("data", [])
+            
+            if data:
+                # Recreate chart 
+                providers = [d["Provider"] for d in data]
+                latencies = [float(d["Avg (ms)"]) for d in data]
+                
+                fig = go.Figure()
+                fig.add_trace(go.Bar(x=providers, y=latencies, marker_color='#F63366'))
+                fig.add_hline(y=baseline, line_dash="dash", line_color="green", annotation_text="Baseline")
+                fig.update_layout(title="Average Latency Comparison", template="plotly_dark")
+                st.plotly_chart(fig, use_container_width=True)
+                
+                st.dataframe(data, use_container_width=True, hide_index=True)
+            else:
+                st.info("No benchmark data in memory.")
+        else:
+            st.info("Run a benchmark on the 'Benchmarking' page to see results here.")
 
-    if selected_file:
-        with open(selected_file) as f:
-            data = json.load(f)
-
-        st.write(f"**Run date:** {data['run_date']}")
-        st.write(f"**Providers:** {', '.join(data['providers'])}")
-
-        st.divider()
-
-        # Show scenarios
-        for scenario in data["scenarios"]:
-            status = "" if scenario["success"] else ""
-            with st.expander(f"{status} {scenario['name']} - {scenario['description']}"):
-                st.write(f"**Type:** {scenario['type']}")
-
-                # Check results
-                st.subheader("Checks")
-                for check, passed in scenario["check_results"].items():
-                    st.write(f"{'::white_check_mark::' if passed else ''} {check}")
-
-                # Metrics
-                if "metrics" in scenario and "pipeline_result" in scenario["metrics"]:
-                    result = scenario["metrics"]["pipeline_result"]
-                    st.subheader("Metrics")
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        st.metric("Total Latency", f"{result['total_latency_ms']:.0f}ms")
-                    with col2:
-                        st.metric("Retrieved", result["retrieved_count"])
-                    with col3:
-                        st.metric("Tokens", result["token_usage"].get("total_tokens", 0))
-
-                # Errors
-                if scenario["errors"]:
-                    st.error(f"Errors: {scenario['errors']}")
+    with tabs[2]:
+        st.subheader("Capability Detection Summary")
+        if "detection_results" in st.session_state and st.session_state.detection_results:
+            results = st.session_state.detection_results
+            for provider, findings in results.items():
+                with st.expander(f"**{provider.upper()}** Detected Features"):
+                    for res in findings:
+                        st.write(f"{'✅' if res['supported'] else '❌'} {res['criterion']} ({res['confidence']:.0%})")
+        else:
+            st.info("Run auto-detection on the 'Auto-Detection' page to see results here.")
 
 
 def quick_start_page():
@@ -920,6 +1001,13 @@ def benchmarking_page():
             })
         st.dataframe(data, use_container_width=True, hide_index=True)
         
+        # PERSIST RESULTS
+        st.session_state.benchmark_results = {
+            "baseline": baseline,
+            "data": data,
+            "raw_results": {p: r.__dict__ for p, r in benchmarker.results.items()} # For deeper analysis if needed
+        }
+        
         # Export
         if st.button("💾 Export Results"):
             output_path = Path("results/benchmark_results.json")
@@ -991,6 +1079,12 @@ def auto_detection_page():
                         st.markdown(f":{confidence_color}[{result.confidence:.0%}]")
                     with col3:
                         st.caption(result.evidence)
+                        
+        # PERSIST RESULTS
+        st.session_state.detection_results = {
+            provider: [r.__dict__ for r in results] 
+            for provider, results in detector.test_results.items()
+        }
                         
         # Auto-fill matrix
         if auto_fill:

@@ -79,6 +79,7 @@ class TracedRAGOrchestrator:
     def query(
         self,
         query: str,
+        history: list[dict[str, str]] | None = None,
         filter_doc_ids: list[str] | None = None,
         stream: bool = False,
         skip_graph_extraction: bool = False,
@@ -102,9 +103,9 @@ class TracedRAGOrchestrator:
             session_id=session_id
         ) as trace:
             # Step 1: Query Analysis
-            with self.obs_manager.span("query_analyzer", SpanType.LLM, trace, inputs={"query": query}) as qa_span:
+            with self.obs_manager.span("query_analyzer", SpanType.LLM, trace, inputs={"query": query, "history_len": len(history or [])}) as qa_span:
                 step_start = time.time()
-                query_analysis = self.orchestrator.query_analyzer.analyze(query)
+                query_analysis = self.orchestrator.query_analyzer.analyze(query, history=history)
                 step_latencies["query_analysis"] = (time.time() - step_start) * 1000
 
                 # Log the LLM call
@@ -228,13 +229,17 @@ class TracedRAGOrchestrator:
                             reasoning_steps,
                             step_latencies,
                             total_start,
-                            skip_graph_extraction,
-                            trace,
-                            gen_span,
+                            history=history,
+                            skip_graph_extraction=skip_graph_extraction,
+                            trace=trace,
+                            gen_span=gen_span,
                         )
     
                     response = self.orchestrator.generator.generate(
-                        query_analysis, reranked_chunks, reasoning_steps=reasoning_steps
+                        query_analysis, 
+                        reranked_chunks, 
+                        reasoning_steps=reasoning_steps,
+                        history=history
                     )
                     step_latencies["generation"] = (time.time() - step_start) * 1000
     
@@ -329,9 +334,10 @@ class TracedRAGOrchestrator:
         reasoning_steps: list[dict[str, Any]],
         step_latencies: dict[str, float],
         total_start: float,
-        skip_graph_extraction: bool,
-        trace: Any,
-        gen_span: Any,
+        history: list[dict[str, str]] | None = None,
+        skip_graph_extraction: bool = False,
+        trace: Any = None,
+        gen_span: Any = None,
     ) -> GenType[str, None, PipelineResult]:
         """Stream response with tracing."""
         step_start = time.time()
@@ -339,6 +345,7 @@ class TracedRAGOrchestrator:
             query_analysis, 
             reranked_chunks, 
             reasoning_steps=reasoning_steps, 
+            history=history,
             stream=True
         )
 

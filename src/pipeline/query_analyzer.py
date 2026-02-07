@@ -33,28 +33,35 @@ class QueryAnalyzer:
     def __init__(self, openai_client: OpenAI | None = None):
         self.client = openai_client or OpenAI(api_key=config.openai_api_key)
 
-    def analyze(self, query: str) -> QueryAnalysis:
+    def analyze(self, query: str, history: list[dict[str, str]] | None = None) -> QueryAnalysis:
         """
         Analyze a user query.
 
         Args:
             query: The user's natural language query
+            history: Optional conversation history
 
         Returns:
             QueryAnalysis with intent, entities, and expanded query
         """
+        history_text = ""
+        if history:
+            history_text = "\n".join([f"{m['role'].upper()}: {m['content']}" for m in history])
+            
+        messages=[
+            {
+                "role": "system",
+                "content": "You are a query analysis assistant. Always respond with valid JSON.",
+            },
+            {
+                "role": "user",
+                "content": f"Conversation History:\n{history_text}\n\n" + QUERY_ANALYSIS_PROMPT.format(query=query),
+            },
+        ]
+        
         response = self.client.chat.completions.create(
             model=config.llm_model,
-            messages=[
-                {
-                    "role": "system",
-                    "content": "You are a query analysis assistant. Always respond with valid JSON.",
-                },
-                {
-                    "role": "user",
-                    "content": QUERY_ANALYSIS_PROMPT.format(query=query),
-                },
-            ],
+            messages=messages,
             temperature=0,
             response_format={"type": "json_object"},
         )
@@ -98,4 +105,5 @@ class QueryAnalyzer:
             entities=cleaned_result.get("entities", []),
             keywords=cleaned_result.get("keywords", []),
             expanded_query=cleaned_result.get("expanded_query"),
+            history=history or []
         )

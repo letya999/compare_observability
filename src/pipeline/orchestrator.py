@@ -98,6 +98,7 @@ class RAGOrchestrator:
     def query(
         self,
         query: str,
+        history: list[dict[str, str]] | None = None,
         filter_doc_ids: list[str] | None = None,
         stream: bool = False,
         skip_graph_extraction: bool = False,
@@ -120,7 +121,7 @@ class RAGOrchestrator:
 
         # Step 1: Query Analysis
         step_start = time.time()
-        query_analysis = self.query_analyzer.analyze(query)
+        query_analysis = self.query_analyzer.analyze(query, history=history)
         step_latencies["query_analysis"] = (time.time() - step_start) * 1000
 
         # Step 2: Retrieval
@@ -156,18 +157,15 @@ class RAGOrchestrator:
         if not retrieval_only:
             if stream:
                 return self._stream_response(
-                    query,
-                    query_analysis,
-                    retrieved_chunks,
-                    reranked_chunks,
-                    reasoning_steps,
-                    step_latencies,
-                    total_start,
-                    skip_graph_extraction,
+                    history=history,
+                    skip_graph_extraction=skip_graph_extraction,
                 )
             else:
                 response = self.generator.generate(
-                    query_analysis, reranked_chunks, reasoning_steps=reasoning_steps
+                    query_analysis, 
+                    reranked_chunks, 
+                    reasoning_steps=reasoning_steps,
+                    history=history
                 )
                 step_latencies["generation"] = (time.time() - step_start) * 1000
 
@@ -209,7 +207,8 @@ class RAGOrchestrator:
         reasoning_steps: list[dict[str, Any]],
         step_latencies: dict[str, float],
         total_start: float,
-        skip_graph_extraction: bool,
+        history: list[dict[str, str]] | None = None,
+        skip_graph_extraction: bool = False,
     ) -> GenType[str, None, PipelineResult]:
         """Stream response and yield chunks."""
         step_start = time.time()
@@ -217,6 +216,7 @@ class RAGOrchestrator:
             query_analysis, 
             reranked_chunks, 
             reasoning_steps=reasoning_steps, 
+            history=history,
             stream=True
         )
 

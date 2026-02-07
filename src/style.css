@@ -1,7 +1,9 @@
 /* Base Styles and Typography */
 @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&display=swap');
 
-html, body, [class*="css"] {
+html,
+body,
+[class*="css"] {
     font-family: 'Outfit', sans-serif !important;
 }
 
@@ -53,17 +55,19 @@ div[data-testid="metric-container"]:hover {
 h1 {
     background: linear-gradient(90deg, #F63366, #FF9B8B);
     -webkit-background-clip: text;
+    background-clip: text;
     -webkit-text-fill-color: transparent;
     font-weight: 800 !important;
 }
 
-h2, h3 {
+h2,
+h3 {
     color: #E0E0E0 !important;
     font-weight: 600 !important;
 }
 
 /* Custom Button */
-.stButton > button {
+.stButton>button {
     background: linear-gradient(90deg, #F63366, #D91E50);
     color: white;
     border: none;
@@ -73,41 +77,41 @@ h2, h3 {
     box-shadow: 0 4px 15px rgba(246, 51, 102, 0.3);
 }
 
-.stButton > button:hover {
+.stButton>button:hover {
     transform: translateY(-2px);
     box-shadow: 0 6px 20px rgba(246, 51, 102, 0.5);
     background: linear-gradient(90deg, #FF4B7A, #F63366);
 }
 
 /* Secondary Button (Ghost) */
-.stButton > button[kind="secondary"] {
+.stButton>button[kind="secondary"] {
     background: transparent;
     border: 1px solid rgba(255, 255, 255, 0.2);
     box-shadow: none;
 }
 
-.stButton > button[kind="secondary"]:hover {
+.stButton>button[kind="secondary"]:hover {
     border-color: #F63366;
     color: #F63366;
 }
 
 /* Text Input/Area */
-.stTextInput > div > div > input,
-.stTextArea > div > div > textarea {
+.stTextInput>div>div>input,
+.stTextArea>div>div>textarea {
     background-color: rgba(255, 255, 255, 0.03);
     color: #FAFAFA;
     border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 8px;
 }
 
-.stTextInput > div > div > input:focus,
-.stTextArea > div > div > textarea:focus {
+.stTextInput>div>div>input:focus,
+.stTextArea>div>div>textarea:focus {
     border-color: #F63366;
     box-shadow: 0 0 0 1px #F63366;
 }
 
 /* Progress Bar */
-.stProgress > div > div > div > div {
+.stProgress>div>div>div>div {
     background: linear-gradient(90deg, #F63366, #FF9B8B);
 }
 
@@ -133,6 +137,43 @@ label[data-baseweb="checkbox"] span:first-child {
 
 ::-webkit-scrollbar-thumb:hover {
     background: rgba(246, 51, 102, 0.5);
+}
+
+/* Chat Message Styling */
+div[data-testid="stChatMessage"] {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 12px;
+    margin-bottom: 1rem;
+    padding: 1rem;
+}
+
+div[data-testid="stChatMessageContent"] {
+    font-size: 1rem;
+    line-height: 1.6;
+}
+
+/* User vs Assistant distinction */
+div[data-testid="stChatMessage"]:has(div[data-testid="stChatMessageAvatarUser"]) {
+    background: rgba(246, 51, 102, 0.05);
+    border-color: rgba(246, 51, 102, 0.1);
+}
+
+/* Chat Input Bar */
+div[data-testid="stChatInput"] {
+    background: rgba(38, 39, 48, 0.8) !important;
+    backdrop-filter: blur(20px);
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    padding: 1rem 0;
+}
+
+/* Trace Inspector Sidebar in Chat */
+div[data-testid="stVerticalBlock"]>div:has(h3:contains("Trace Inspector")) {
+    background: rgba(255, 255, 255, 0.02);
+    border-left: 1px solid rgba(255, 255, 255, 0.05);
+    padding: 1rem;
+    height: 100vh;
+    overflow-y: auto;
 }
 
 /* Custom Alert Boxes */
