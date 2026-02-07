@@ -6,10 +6,12 @@ from .scenarios import (
     Scenario,
     ScenarioResult,
 )
+from .discovery import DiscoveryGenerator
 
 __all__ = [
     "ScenarioRunner",
     "SCENARIOS",
     "Scenario",
     "ScenarioResult",
+    "DiscoveryGenerator",
 ]

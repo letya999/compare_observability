@@ -8,10 +8,12 @@ import os
 from pathlib import Path
 import streamlit as st
 from dotenv import load_dotenv
+import plotly.express as px
+import plotly.graph_objects as go
 
 # Force reload env vars from explicit path
 env_path = Path(__file__).parent / ".env"
-st.write(f"Loading config from: {env_path}") # Debug output
+# st.write(f"Loading config from: {env_path}") # Debug output
 load_dotenv(dotenv_path=env_path, override=True)
 
 # Debug: Print loaded keys status (masked)
@@ -24,15 +26,24 @@ from src.config import config
 from src.logger import logger
 from src.pipeline.traced_orchestrator import TracedRAGOrchestrator
 from src.evaluations.comparison_matrix import ComparisonMatrix, PLATFORMS, CRITERIA, CriteriaCategory
-from scenarios import SCENARIOS, ScenarioRunner
+from scenarios import SCENARIOS, ScenarioRunner, DiscoveryGenerator
 
 
 # Page config
 st.set_page_config(
     page_title="PDF Knowledge Explorer - Observability Comparison",
-    page_icon="",
+    page_icon="🔍",
     layout="wide",
 )
+
+def load_css():
+    """Load custom CSS styles."""
+    css_path = Path(__file__).parent / "src" / "style.css"
+    with open(css_path) as f:
+        st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+
+# Load styles immediately
+load_css()
 
 
 @st.cache_resource(show_spinner="Initializing Orchestrator...")
@@ -43,9 +54,6 @@ def get_orchestrator(selected_providers: list[str] | None = None):
 
 
 def main():
-    st.title("PDF Knowledge Explorer")
-    st.caption("RAG System for Testing Observability Platforms")
-
     # Sidebar
     with st.sidebar:
         st.header("Configuration")
@@ -269,13 +277,13 @@ def query_page():
                         st.caption(f"Confidence: {concept.confidence:.2f}")
 
             # Trace URLs
-            trace_urls = orchestrator.obs_manager.get_trace_urls(
-                type("FakeTrace", (), {"provider_spans": {}, "trace_ids": {}})()
-            )
+            trace_urls = getattr(result, "trace_urls", {})
             if trace_urls:
                 st.subheader("View Traces")
-                for provider, url in trace_urls.items():
-                    st.markdown(f"[{provider}]({url})")
+                cols = st.columns(min(len(trace_urls), 4))
+                for i, (provider, url) in enumerate(trace_urls.items()):
+                    with cols[i % 4]:
+                        st.link_button(f"🔍 {provider}", url, use_container_width=True)
 
 
 def pdf_management_page():
@@ -346,50 +354,86 @@ def scenarios_page():
     """Test scenarios runner."""
     st.header("Test Scenarios")
 
+    if "orchestrator" in st.session_state:
+        orchestrator = st.session_state.orchestrator
+    else:
+        orchestrator = get_orchestrator(None)
+
     st.markdown("""
-    Run predefined test scenarios to compare how different observability platforms handle various use cases.
+    Run test scenarios to compare how different observability platforms handle various use cases.
     """)
 
-    # Scenario selection
-    scenario_names = list(SCENARIOS.keys())
-    selected_scenarios = st.multiselect(
+    # --- Discovery Section ---
+    st.subheader("🔍 Content-Aware Discovery")
+    st.caption("Generate tests based on the documents currently in your index (e.g., 'Master and Margarita')")
+
+    if "custom_scenarios" not in st.session_state:
+        st.session_state.custom_scenarios = {}
+
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        num_to_gen = st.slider("Number of scenarios to generate", 1, 10, 3)
+    with col2:
+        if st.button("✨ Generate Tests", help="Analyze indexed PDFs and create relevant test cases"):
+            with st.spinner("Analyzing content and generating scenarios..."):
+                generator = DiscoveryGenerator(orchestrator)
+                new_scenarios = generator.generate_scenarios(count=num_to_gen)
+                for s in new_scenarios:
+                    st.session_state.custom_scenarios[s.name] = s
+                st.success(f"Generated {len(new_scenarios)} content-aware scenarios!")
+
+    st.divider()
+
+    # Combine predefined and custom scenarios
+    all_scenarios = {**SCENARIOS, **st.session_state.custom_scenarios}
+    scenario_names = list(all_scenarios.keys())
+
+    # Filter out technical ones if non-technical docs are loaded?
+    # Let's just let the user choose.
+
+    selected_names = st.multiselect(
         "Select scenarios to run",
         scenario_names,
-        default=scenario_names[:2],
+        default=[n for n in scenario_names if n in st.session_state.custom_scenarios][:3] or scenario_names[:2],
     )
 
     # Show scenario details
-    for name in selected_scenarios:
-        scenario = SCENARIOS[name]
-        with st.expander(f"**{scenario.name}** - {scenario.description}"):
-            st.write(f"**Type:** {scenario.type.value}")
-            st.write(f"**Expected spans:** {scenario.expected_spans}")
-            st.write(f"**Query:** {scenario.query if isinstance(scenario.query, str) else scenario.query[0]}")
-            st.write(f"**Checks:** {[c.value for c in scenario.checks]}")
+    if selected_names:
+        st.subheader("Scenario Preview")
+        for name in selected_names:
+            scenario = all_scenarios[name]
+            is_generated = scenario.metadata.get("generated", False)
+            label = f"**{scenario.name}** {'(✨ Generated)' if is_generated else ''}"
+            with st.expander(f"{label} - {scenario.description}"):
+                st.write(f"**Type:** {scenario.type.value}")
+                st.write(f"**Query:** {scenario.query if isinstance(scenario.query, str) else scenario.query[0]}")
+                st.write(f"**Checks:** {[c.value for c in scenario.checks]}")
 
-    if st.button("Run Selected Scenarios", type="primary", disabled=not selected_scenarios):
+    if st.button("🚀 Run Selected Scenarios", type="primary", disabled=not selected_names):
         runner = ScenarioRunner()
 
         progress = st.progress(0)
-        for i, scenario_name in enumerate(selected_scenarios):
-            with st.spinner(f"Running {scenario_name}..."):
-                result = runner.run_scenario(scenario_name)
+        results_container = st.container()
 
-                # Show result
-                status = "" if result.success else ""
-                st.write(f"{status} **{scenario_name}**: {sum(result.check_results.values())}/{len(result.check_results)} checks passed")
+        for i, name in enumerate(selected_names):
+            scenario = all_scenarios[name]
+            with st.spinner(f"Running {name}..."):
+                result = runner.run_scenario(scenario)
 
-                if result.errors:
-                    st.error(f"Errors: {result.errors}")
+                # Show result in container
+                with results_container:
+                    status = "✅" if result.success else "❌"
+                    st.write(f"{status} **{name}**: {sum(result.check_results.values())}/{len(result.check_results)} checks passed")
+                    if result.errors:
+                        st.error(f"Errors: {result.errors}")
 
-            progress.progress((i + 1) / len(selected_scenarios))
+            progress.progress((i + 1) / len(selected_names))
 
         # Export results
         output_path = runner.export_results()
         st.success(f"Results exported to: {output_path}")
 
-        # Summary
-        runner.print_summary()
+        # Summary components
         runner.shutdown()
 
 
@@ -405,6 +449,16 @@ def matrix_page():
         matrix.import_json(matrix_path)
         st.info("Loaded existing matrix data")
 
+    # Platform Legend
+    with st.expander("ℹ️ Platform Abbreviation Legend", expanded=True):
+        cols = st.columns(3)
+        platform_items = list(PLATFORMS.items())
+        for i in range(3):
+            with cols[i]:
+                for j in range(i, len(platform_items), 3):
+                    name, abbrev = platform_items[j]
+                    st.write(f"**{abbrev}**: {name.title()}")
+
     # Category tabs
     tabs = st.tabs([cat.value.replace("_", " ").title() for cat in CriteriaCategory])
 
@@ -419,34 +473,42 @@ def matrix_page():
             st.subheader(f"{category.value.replace('_', ' ').title()}")
 
             for criterion_name, criterion in category_criteria:
-                st.markdown(f"**{criterion.name}**")
+                st.markdown(f"#### {criterion.name}")
                 st.caption(criterion.description)
 
+                # Show inputs in a grid that handles many platforms better
                 cols = st.columns(len(PLATFORMS))
                 for col, (platform, abbrev) in zip(cols, PLATFORMS.items()):
                     with col:
                         current = matrix.get_score(platform, criterion_name)
                         current_value = current.value if current else None
+                        
+                        # Add platform name to tooltip
+                        help_text = f"{platform.title()} ({abbrev})"
 
                         if criterion.value_type == "boolean":
                             new_value = st.checkbox(
                                 abbrev,
                                 value=bool(current_value),
                                 key=f"{criterion_name}_{platform}",
+                                help=help_text
                             )
                         elif criterion.value_type == "rating":
-                            new_value = st.slider(
+                            new_value = st.number_input(
                                 abbrev,
                                 min_value=0,
                                 max_value=criterion.max_value or 5,
-                                value=current_value or 0,
+                                value=int(current_value or 0),
                                 key=f"{criterion_name}_{platform}",
+                                help=help_text,
+                                label_visibility="visible"
                             )
                         else:
                             new_value = st.text_input(
                                 abbrev,
                                 value=current_value or "",
                                 key=f"{criterion_name}_{platform}",
+                                help=help_text
                             )
 
                         if new_value != current_value:
@@ -455,33 +517,88 @@ def matrix_page():
                 st.divider()
 
     # Export buttons
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
     with col1:
-        if st.button("Save Matrix"):
+        if st.button("💾 Save Matrix"):
             matrix_path.parent.mkdir(parents=True, exist_ok=True)
             matrix.export_json(matrix_path)
             st.success("Matrix saved!")
 
     with col2:
-        if st.button("Export Markdown"):
+        if st.button("📝 Export Markdown"):
             md_path = Path("results/comparison_matrix.md")
             md_path.parent.mkdir(parents=True, exist_ok=True)
             matrix.export_markdown(md_path)
             st.success(f"Exported to {md_path}")
 
     with col3:
-        if st.button("Show Summary"):
-            matrix.print_summary()
+        if st.button("📊 Show Rankings"):
             totals = matrix.calculate_totals()
+            
+            # 1. Prepare Data for Charts
+            platforms = []
+            feature_scores = []
+            ratings = []
+            
+            for platform, scores in totals.items():
+                platforms.append(PLATFORMS[platform]) # Use abbrev
+                feature_scores.append(scores['bool_percentage'])
+                ratings.append(scores['avg_rating'] * 20) # Scale 5 to 100 for comparison
+            
+            # 2. Radar Chart
+            fig = go.Figure()
 
-            st.subheader("Platform Rankings")
+            fig.add_trace(go.Scatterpolar(
+                r=feature_scores,
+                theta=platforms,
+                fill='toself',
+                name='Feature Completion %'
+            ))
+            
+            fig.add_trace(go.Scatterpolar(
+                r=ratings,
+                theta=platforms,
+                fill='toself',
+                name='User Rating (Scaled %)'
+            ))
+
+            fig.update_layout(
+                polar=dict(
+                    radialaxis=dict(visible=True, range=[0, 100])
+                ),
+                showlegend=True,
+                title="Platform Comparison: Features vs Ratings",
+                template="plotly_dark",
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(0,0,0,0)",
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+
+            # 3. Tables
+            st.subheader("Detailed Rankings")
             sorted_platforms = sorted(
                 totals.items(),
-                key=lambda x: x[1]["bool_features"],
+                key=lambda x: (x[1]["bool_features"], x[1]["avg_rating"]),
                 reverse=True,
             )
+            
+            # Display as a dataframe for better look
+            data = []
             for platform, scores in sorted_platforms:
-                st.write(f"**{platform}**: {scores['bool_features']}/{scores['bool_total']} features ({scores['bool_percentage']:.0f}%)")
+                data.append({
+                    "Platform": platform.title(),
+                    "Features": f"{scores['bool_features']}/{scores['bool_total']} ({scores['bool_percentage']:.0f}%)",
+                    "Rating": f"{scores['avg_rating']:.1f}/5"
+                })
+            st.dataframe(data, use_container_width=True, hide_index=True)
+
+    with col4:
+        if st.button("🗑️ Clear Matrix"):
+            if st.checkbox("Confirm clear?"):
+                if matrix_path.exists():
+                    matrix_path.unlink()
+                st.rerun()
 
 
 def results_page():
@@ -545,36 +662,96 @@ def results_page():
 
 def quick_start_page():
     """Interactive Quick Start Guide."""
-    st.header("Quick Start Guide 🚀")
+    st.markdown("<h1 style='text-align: center; margin-bottom: 2rem;'>🚀 PDF Knowledge Explorer</h1>", unsafe_allow_html=True)
     
     st.markdown("""
-    Welcome to the **PDF Knowledge Explorer**! This tool is designed to benchmark and compare LLM observability platforms.
+    <div style='text-align: center; color: #E0E0E0; margin-bottom: 3rem;'>
+        The ultimate workbench for benchmarking <b>LLM Observability Platforms</b>. 
+        Compare traces, latency, and costs across 12+ providers in real-time.
+    </div>
+    """, unsafe_allow_html=True)
+
+    # 1. Features Grid
+    st.subheader("✨ Key Capabilities")
+    col1, col2, col3, col4 = st.columns(4)
     
-    ### How it works
-    1. **Configuration**: Use the sidebar to select which observability providers you want to test (e.g., Langfuse, Weave, Honeycomb).
-    2. **Ingest Data**: Go to **PDF Management** to upload your own PDFs or use the pre-loaded data.
-    3. **Query**: Use the **Query Interface** to ask questions. The system will retrieve relevant chunks, rerank them, and generate an answer with citations.
-    4. **Observe**: Click the trace links to see how different platforms visualize the RAG pipeline.
+    with col1:
+        with st.container(border=True):
+            st.markdown("### 📚 RAG Engine")
+            st.caption("Hybrid Search (Vector + BM25) with reranking for high-precision retrieval.")
     
-    ### Key Features
-    * **Hybrid Search**: Combines Vector Search (ChromaDB) and Keyword Search (BM25).
-    * **Agentic Tools**: Can use a Calculator or Web Search if needed (Reasoning Step).
-    * **Evaluations**: Automatically runs Ragas metrics (Faithfulness, Answer Relevance) and estimates costs.
-    * **Comparison**: Run **Test Scenarios** to systematically verify features across platforms.
+    with col2:
+        with st.container(border=True):
+            st.markdown("### 🕵️ Observability")
+            st.caption("Send traces to LangSmith, Langfuse, Arize, and 9 others simultaneously.")
+
+    with col3:
+        with st.container(border=True):
+            st.markdown("### 🧪 Scenarios")
+            st.caption("Run automated test cases (Multi-hop, Long Context) to verify platform features.")
+            
+    with col4:
+        with st.container(border=True):
+            st.markdown("### 📊 Analytics")
+            st.caption("Compare feature matrices, ratings, and performance metrics side-by-side.")
+
+    st.divider()
+
+    # 2. Workflow
+    st.subheader("⚡ How to get started")
+    
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        st.info("**1. Configure**\nSelect providers in the sidebar and set API keys.")
+    with c2:
+        st.info("**2. Ingest**\nUpload PDFs in 'PDF Management' to build your knowledge base.")
+    with c3:
+        st.info("**3. Query**\nAsk questions in 'Query Interface' and watch the traces flow.")
+    with c4:
+        st.info("**4. Compare**\nCheck 'Comparison Matrix' to rate and rank platforms.")
+
+    st.divider()
+    
+    # 3. Architecture
+    st.subheader("🏗️ System Architecture")
+    st.graphviz_chart("""
+    digraph G {
+        rankdir=LR;
+        bgcolor="transparent";
+        node [style=filled, fillcolor="#262730", fontcolor="white", shape=box, fontname="Sans-Serif"];
+        edge [color="#F63366"];
+        
+        User -> "Query Analysis" [color="white"];
+        "Query Analysis" -> "Hybrid Retrieval";
+        "Hybrid Retrieval" -> "Reranker";
+        "Reranker" -> "Reasoning (Tools)";
+        "Reasoning (Tools)" -> "Generation";
+        "Generation" -> "Graph Extraction";
+        "Graph Extraction" -> User [label="Answer", color="white"];
+        
+        subgraph cluster_obs {
+            label = "Observability Layer (Async)";
+            style=dashed;
+            color="#F63366";
+            fontcolor="white";
+            "LangSmith"; "Langfuse"; "Arize"; "Others...";
+        }
+        
+        "Generation" -> "LangSmith" [style=dotted];
+        "Generation" -> "Langfuse" [style=dotted];
+    }
     """)
     
-    st.info("💡 **Tip:** Make sure you have set your API keys in the `.env` file or environment variables.")
-    
-    st.subheader("Architecture")
-    st.code("""
-    User Query -> Query Analysis -> Hybrid Retrieval (Vector + BM25) -> Reranking -> Reasoning (Tools) -> Generation -> Graph Extraction
-    """, language="text")
-    
-    if st.button("Go to Query Interface", type="primary"):
-        st.switch_page("app.py") # Note: switch_page might not work well with single-script structure logic, better to just user helper
-        # Actually in this structure, we just change state, but we can't easily do that without session state triggers.
-        # Just let user navigate.
-        pass
+    col1, col2 = st.columns([1, 2])
+    with col1:
+        if st.button("Start Querying ➡️", type="primary", use_container_width=True):
+            st.switch_page("app.py") # Just reloads, user needs to click nav. 
+            # Note: switch_page("app.py") works if it's a multipage app file structure.
+            # Here it's a single file app, so this might fail or just reload.
+            # Let's just guide user.
+            pass
+    with col2:
+        st.caption("Check the sidebar to navigate to other pages.")
 
 
 if __name__ == "__main__":

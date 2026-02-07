@@ -110,9 +110,9 @@ class PDFIngestor:
             blocks = page.get_text("blocks")
             page_height = page.rect.height
             
-            # Margins for header/footer detection (approx 8% top/bottom)
-            top_margin = page_height * 0.08
-            bottom_margin = page_height * 0.92
+            # Margins for header/footer detection (approx 10% top/bottom)
+            top_margin = page_height * 0.10
+            bottom_margin = page_height * 0.90
 
             for b in blocks:
                 x0, y0, x1, y1, text, _, _ = b
@@ -125,10 +125,10 @@ class PDFIngestor:
                 
                 # --- 2. Content Heuristics ---
                 # Detect page numbers (digits only, or "Page X")
-                is_page_num = re.match(r'^(page\s?)?\d+$', text.lower())
+                is_page_num = bool(re.match(r'^(page\s?)?\d+$', text.lower()))
                 
-                # Detect URL/Domain patterns common in headers
-                is_url = bool(re.search(r'(www\.|http:|https:|\.com|\.ru|\.org)', text.lower()))
+                # Detect URL/Domain patterns
+                has_url = bool(re.search(r'(www\.|http:|https:|\.com|\.ru|\.org|\.net)', text.lower()))
 
                 # Detect Title/Author repetition (simple header check)
                 is_title_noise = (len(text) < 100) and (
@@ -136,7 +136,14 @@ class PDFIngestor:
                     (doc_author and doc_author.lower() in text.lower())
                 )
 
-                if is_header_footer and (is_page_num or is_title_noise or is_url):
+                # --- 3. Filter Logic ---
+                # Short blocks with URLs are likely watermarks/headers - filter anywhere
+                is_short_url_block = has_url and len(text) < 150
+                if is_short_url_block:
+                    continue
+
+                # Filter header/footer noise
+                if is_header_footer and (is_page_num or is_title_noise):
                     continue
 
                 items.append({

@@ -44,6 +44,7 @@ class PipelineResult:
     step_latencies: dict[str, float] = field(default_factory=dict)
     cost_estimate_usd: float = 0.0
     eval_metrics: dict[str, float] = field(default_factory=dict)
+    trace_urls: dict[str, str] = field(default_factory=dict)
 
 
 class RAGOrchestrator:

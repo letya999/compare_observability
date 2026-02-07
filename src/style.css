@@ -1,0 +1,142 @@
+/* Base Styles and Typography */
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&display=swap');
+
+html, body, [class*="css"] {
+    font-family: 'Outfit', sans-serif !important;
+}
+
+/* Glassmorphism Container */
+.stApp {
+    background: radial-gradient(circle at 50% 10%, #1a1c24 0%, #0E1117 100%);
+}
+
+.stSidebar {
+    background: rgba(38, 39, 48, 0.4);
+    backdrop-filter: blur(10px);
+    border-right: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Custom Cards/Containers */
+div[data-testid="stExpander"] {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 12px;
+    padding: 10px;
+    transition: all 0.3s ease;
+}
+
+div[data-testid="stExpander"]:hover {
+    border-color: rgba(246, 51, 102, 0.3);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+}
+
+/* Metrics Cards */
+div[data-testid="stMetricValue"] {
+    color: #F63366 !important;
+    font-weight: 600;
+}
+
+div[data-testid="metric-container"] {
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 12px;
+    padding: 1rem;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    transition: transform 0.2s ease;
+}
+
+div[data-testid="metric-container"]:hover {
+    transform: translateY(-2px);
+    border-color: rgba(246, 51, 102, 0.3);
+}
+
+/* Header Gradient Text */
+h1 {
+    background: linear-gradient(90deg, #F63366, #FF9B8B);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    font-weight: 800 !important;
+}
+
+h2, h3 {
+    color: #E0E0E0 !important;
+    font-weight: 600 !important;
+}
+
+/* Custom Button */
+.stButton > button {
+    background: linear-gradient(90deg, #F63366, #D91E50);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-weight: 600;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 15px rgba(246, 51, 102, 0.3);
+}
+
+.stButton > button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(246, 51, 102, 0.5);
+    background: linear-gradient(90deg, #FF4B7A, #F63366);
+}
+
+/* Secondary Button (Ghost) */
+.stButton > button[kind="secondary"] {
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    box-shadow: none;
+}
+
+.stButton > button[kind="secondary"]:hover {
+    border-color: #F63366;
+    color: #F63366;
+}
+
+/* Text Input/Area */
+.stTextInput > div > div > input,
+.stTextArea > div > div > textarea {
+    background-color: rgba(255, 255, 255, 0.03);
+    color: #FAFAFA;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+}
+
+.stTextInput > div > div > input:focus,
+.stTextArea > div > div > textarea:focus {
+    border-color: #F63366;
+    box-shadow: 0 0 0 1px #F63366;
+}
+
+/* Progress Bar */
+.stProgress > div > div > div > div {
+    background: linear-gradient(90deg, #F63366, #FF9B8B);
+}
+
+/* Checkboxes & Radio Buttons */
+label[data-baseweb="checkbox"] span:first-child {
+    border-color: rgba(246, 51, 102, 0.5);
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.02);
+}
+
+::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: rgba(246, 51, 102, 0.5);
+}
+
+/* Custom Alert Boxes */
+div[data-baseweb="notification"] {
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}

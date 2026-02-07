@@ -37,8 +37,20 @@ class EvidentlyProvider(ObservabilityProvider):
             from evidently.report import Report
             from evidently.metric_preset import TextEvals
 
-            # Evidently works locally by default
-            # Cloud requires separate setup
+            # Evidently Setup
+            api_key = os.getenv("EVIDENTLY_API_KEY")
+            
+            if api_key:
+                try:
+                    from evidently.ui.workspace import CloudWorkspace, Workspace
+                    self.workspace = CloudWorkspace(token=api_key, url="https://app.evidently.cloud")
+                    print("[Evidently] Initialized Cloud Workspace")
+                except Exception as cloud_err:
+                    print(f"[Evidently] Cloud init failed (using local): {cloud_err}")
+                    self.workspace = None
+            else:
+                self.workspace = None
+                
             self.initialized = True
             return True
         except ImportError:

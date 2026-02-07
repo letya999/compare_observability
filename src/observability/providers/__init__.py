@@ -8,10 +8,10 @@ from .braintrust import BraintrustProvider
 from .laminar import LaminarProvider
 from .agentops import AgentOpsProvider
 from .evidently import EvidentlyProvider
-from .evidently import EvidentlyProvider
 from .logfire import LogfireProvider
 from .weave import WeaveProvider
 from .honeycomb import HoneycombProvider
+from .helicone import HeliconeProvider
 
 # Registry of provider classes
 PROVIDER_CLASSES = {
@@ -23,10 +23,10 @@ PROVIDER_CLASSES = {
     "laminar": LaminarProvider,
     "agentops": AgentOpsProvider,
     "evidently": EvidentlyProvider,
-    "evidently": EvidentlyProvider,
     "logfire": LogfireProvider,
     "weave": WeaveProvider,
     "honeycomb": HoneycombProvider,
+    "helicone": HeliconeProvider,
 }
 
 __all__ = [

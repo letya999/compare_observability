@@ -43,6 +43,20 @@ class TracedRAGOrchestrator:
         self.cost_tracker = CostTracker()
         self.ragas_evaluator = RagasEvaluator()
 
+    def __getattr__(self, name):
+        """Delegate attribute access to the underlying orchestrator."""
+        return getattr(self.orchestrator, name)
+
+    @property
+    def retriever(self):
+        """Access the underlying retriever."""
+        return self.orchestrator.retriever
+
+    @property
+    def generator(self):
+        """Access the underlying generator."""
+        return self.orchestrator.generator
+
     def ingest_pdf(self, pdf_path: Path) -> tuple[Document, int]:
         """Ingest a PDF with tracing."""
         with self.obs_manager.trace("pdf_ingestion", inputs={"pdf_path": str(pdf_path)}) as trace:
@@ -293,6 +307,7 @@ class TracedRAGOrchestrator:
                 step_latencies=step_latencies,
                 cost_estimate_usd=cost,
                 eval_metrics=eval_metrics,
+                trace_urls=trace_urls,
             )
 
             # Update trace output with the final answer
@@ -373,6 +388,9 @@ class TracedRAGOrchestrator:
 
         total_latency = (time.time() - total_start) * 1000
 
+        # Get trace URLs
+        trace_urls = self.obs_manager.get_trace_urls(trace)
+
         yield PipelineResult(
             query=query,
             query_analysis=query_analysis,
@@ -383,6 +401,7 @@ class TracedRAGOrchestrator:
             concepts=concepts,
             total_latency_ms=total_latency,
             step_latencies=step_latencies,
+            trace_urls=trace_urls,
         )
 
     def _update_outputs(self, span: Any, outputs: dict) -> Any:

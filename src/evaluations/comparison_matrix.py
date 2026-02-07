@@ -12,9 +12,13 @@ class CriteriaCategory(Enum):
     """Categories of comparison criteria."""
     SETUP = "setup_integration"
     TRACING = "tracing_features"
+    AGENTIC = "agentic_logic"
     LLM = "llm_specific"
     RETRIEVAL = "retrieval_specific"
     EVALUATIONS = "evaluations"
+    SECURITY = "security_compliance"
+    OPTIMIZATION = "optimization_dev"
+    DEBUGGING_RCA = "debugging_rca"
     PRODUCTION = "production_ui"
     BUSINESS = "business"
 
@@ -73,6 +77,18 @@ CRITERIA = {
         "rating",
         max_value=5,
     ),
+    "ide_integration": Criterion(
+        "IDE Integration",
+        CriteriaCategory.SETUP,
+        "Plugins for VS Code/Cursor/IDE",
+        "boolean",
+    ),
+    "sdk_latency_overhead": Criterion(
+        "SDK Latency Overhead (%)",
+        CriteriaCategory.SETUP,
+        "Percentage of latency added by the SDK",
+        "number",
+    ),
 
     # B. Tracing Features
     "nested_spans": Criterion(
@@ -111,6 +127,56 @@ CRITERIA = {
         "Captures and displays errors properly",
         "boolean",
     ),
+    "viz_gantt_chart": Criterion(
+        "Gantt Chart View",
+        CriteriaCategory.TRACING,
+        "Timeline-based visualization of spans",
+        "boolean",
+    ),
+    "viz_flow_diagram": Criterion(
+        "Flow/Graph Diagram",
+        CriteriaCategory.TRACING,
+        "DAG/Node-based flow visualization",
+        "boolean",
+    ),
+    "viz_tree_view": Criterion(
+        "Hierarchical Tree View",
+        CriteriaCategory.TRACING,
+        "Traditional nested folder-style view",
+        "boolean",
+    ),
+    "trace_export": Criterion(
+        "Trace Export (JSON/CSV)",
+        CriteriaCategory.TRACING,
+        "Ability to export raw trace data",
+        "boolean",
+    ),
+
+    # New Category: Agentic Logic
+    "session_replays": Criterion(
+        "Session Replays",
+        CriteriaCategory.AGENTIC,
+        "Can replay full agent sessions (not just single traces)",
+        "boolean",
+    ),
+    "state_memory_view": Criterion(
+        "State/Memory View",
+        CriteriaCategory.AGENTIC,
+        "View and debug internal agent memory/state",
+        "boolean",
+    ),
+    "thread_support": Criterion(
+        "Thread Management",
+        CriteriaCategory.AGENTIC,
+        "Support for long-lived agent sessions (Threads)",
+        "boolean",
+    ),
+    "browser_agent_viz": Criterion(
+        "Browser Agent Visualization",
+        CriteriaCategory.AGENTIC,
+        "Specific UI for browser-based agents",
+        "boolean",
+    ),
 
     # C. LLM-Specific
     "token_counting": Criterion(
@@ -141,6 +207,24 @@ CRITERIA = {
         "Multi-provider support",
         CriteriaCategory.LLM,
         "Supports multiple LLM providers",
+        "boolean",
+    ),
+    "playground_support": Criterion(
+        "Interactive Playground",
+        CriteriaCategory.LLM,
+        "Directly test and tweak prompts in UI",
+        "boolean",
+    ),
+    "prompt_registry": Criterion(
+        "Prompt Registry/Versioning",
+        CriteriaCategory.LLM,
+        "Manage prompt versions separate from code",
+        "boolean",
+    ),
+    "model_comparison": Criterion(
+        "Model-to-Model Comparison",
+        CriteriaCategory.LLM,
+        "Compare outputs from different models side-by-side",
         "boolean",
     ),
 
@@ -207,6 +291,120 @@ CRITERIA = {
         "Alerts on performance regressions",
         "boolean",
     ),
+    "multimodal_evals": Criterion(
+        "Multi-modal Evals",
+        CriteriaCategory.EVALUATIONS,
+        "Support for Voice/Audio/Video evaluations",
+        "boolean",
+    ),
+    "unit_test_integration": Criterion(
+        "Unit Test Integration",
+        CriteriaCategory.EVALUATIONS,
+        "Integration with pytest/testing frameworks",
+        "boolean",
+    ),
+    "experiments_tracking": Criterion(
+        "Experiment Tracking",
+        CriteriaCategory.EVALUATIONS,
+        "Organize and compare multiple test runs",
+        "boolean",
+    ),
+    "datasets_management": Criterion(
+        "Dataset Management",
+        CriteriaCategory.EVALUATIONS,
+        "Curate golden datasets for testing",
+        "boolean",
+    ),
+    "annotations_manual": Criterion(
+        "Manual Annotations",
+        CriteriaCategory.EVALUATIONS,
+        "Human-in-the-loop scoring and notes",
+        "boolean",
+    ),
+    "labeling_workflows": Criterion(
+        "Labeling Workflows",
+        CriteriaCategory.EVALUATIONS,
+        "Structured processes for data labeling",
+        "boolean",
+    ),
+
+    # New Category: Debugging & Root Cause Analysis (RCA)
+    "trace_diff_view": Criterion(
+        "Trace Diff / Side-by-Side",
+        CriteriaCategory.DEBUGGING_RCA,
+        "Compare two traces with structural diff highlighting",
+        "boolean",
+    ),
+    "ai_failure_summarization": Criterion(
+        "AI Failure Summarization",
+        CriteriaCategory.DEBUGGING_RCA,
+        "AI-generated explanation of why a trace failed",
+        "boolean",
+    ),
+    "automated_rca": Criterion(
+        "Automated Root Cause Analysis",
+        CriteriaCategory.DEBUGGING_RCA,
+        "Tools to pinpoint the exact step where quality dropped",
+        "boolean",
+    ),
+    "issue_clustering": Criterion(
+        "Issue Clustering",
+        CriteriaCategory.DEBUGGING_RCA,
+        "Grouping similar failures/errors automatically",
+        "boolean",
+    ),
+    "time_series_compare": Criterion(
+        "Time-Series Performance Compare",
+        CriteriaCategory.DEBUGGING_RCA,
+        "Compare metric trends (latency/cost) over time periods",
+        "boolean",
+    ),
+    "outlier_detection": Criterion(
+        "Outlier Detection",
+        CriteriaCategory.DEBUGGING_RCA,
+        "Automatically flag anomalous or slow traces",
+        "boolean",
+    ),
+
+    # New Category: Security & Compliance (The "Blue Ocean")
+    "pii_compliance": Criterion(
+        "PII/Compliance Shield",
+        CriteriaCategory.SECURITY,
+        "Automatic detection of PII (SOC2/HIPAA)",
+        "boolean",
+    ),
+    "prompt_injection_guard": Criterion(
+        "Prompt Injection Guard",
+        CriteriaCategory.SECURITY,
+        "Detects and alerts on injection attacks",
+        "boolean",
+    ),
+    "security_analyzers": Criterion(
+        "Security Analyzers",
+        CriteriaCategory.SECURITY,
+        "Dedicated tools for security auditing",
+        "boolean",
+    ),
+
+    # New Category: Optimization & Developer Experience
+    "auto_prompt_fix": Criterion(
+        "Auto-Prompt Fix (AutoTune)",
+        CriteriaCategory.OPTIMIZATION,
+        "Automatically suggests prompt improvements",
+        "boolean",
+    ),
+    "hot_reload_debug": Criterion(
+        "Hot Reload (Active Debug)",
+        CriteriaCategory.OPTIMIZATION,
+        "Interactively modify state/prompt and resume",
+        "boolean",
+    ),
+    "local_first_dev": Criterion(
+        "Local-first / Offline mode",
+        CriteriaCategory.OPTIMIZATION,
+        "Full functionality without cloud connection",
+        "boolean",
+    ),
 
     # F. Production & UI
     "latency_dashboards": Criterion(
@@ -252,6 +450,24 @@ CRITERIA = {
         "Visual design and UX quality (1-5)",
         "rating",
         max_value=5,
+    ),
+    "custom_dashboards": Criterion(
+        "Custom Dashboards",
+        CriteriaCategory.PRODUCTION,
+        "Create custom views and charts",
+        "boolean",
+    ),
+    "realtime_charts": Criterion(
+        "Real-time Charts",
+        CriteriaCategory.PRODUCTION,
+        "Live updating performance metrics",
+        "boolean",
+    ),
+    "alerting_system": Criterion(
+        "Advanced Alerting",
+        CriteriaCategory.PRODUCTION,
+        "Slack/Email/Webhook alerts on thresholds",
+        "boolean",
     ),
 
     # G. Business

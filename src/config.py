@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 ObservabilityProvider = Literal[
-    "langsmith", "langfuse", "arize", "opik", "braintrust", "laminar", "agentops", "evidently", "logfire", "weave", "honeycomb"
+    "langsmith", "langfuse", "arize", "opik", "braintrust", "laminar", "agentops", "evidently", "logfire", "weave", "honeycomb", "helicone"
 ]
 
 

@@ -45,9 +45,10 @@ class ScenarioRunner:
         )
         self.results: list[ScenarioResult] = []
 
-    def run_scenario(self, scenario_name: str) -> ScenarioResult:
+    def run_scenario(self, scenario: str | Scenario) -> ScenarioResult:
         """Run a single scenario and collect results."""
-        scenario = get_scenario(scenario_name)
+        if isinstance(scenario, str):
+            scenario = get_scenario(scenario)
         print(f"\n{'='*60}")
         print(f"Running scenario: {scenario.name}")
         print(f"Description: {scenario.description}")

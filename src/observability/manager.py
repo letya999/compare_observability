@@ -56,6 +56,11 @@ class ObservabilityManager:
         from .providers.langfuse import LangfuseProvider
         from .providers.opik import OpikProvider
         from .providers.braintrust import BraintrustProvider
+        from .providers.laminar import LaminarProvider
+        from .providers.agentops import AgentOpsProvider
+        from .providers.evidently import EvidentlyProvider
+        from .providers.logfire import LogfireProvider
+        from .providers.helicone import HeliconeProvider
 
         provider_classes = {
             "langsmith": LangSmithProvider,
@@ -63,6 +68,11 @@ class ObservabilityManager:
             "arize": ArizePhoenixProvider,
             "opik": OpikProvider,
             "braintrust": BraintrustProvider,
+            "laminar": LaminarProvider,
+            "agentops": AgentOpsProvider,
+            "evidently": EvidentlyProvider,
+            "logfire": LogfireProvider,
+            "helicone": HeliconeProvider,
         }
 
         print(f"[Observability] Initializing providers: {self.provider_names}")
